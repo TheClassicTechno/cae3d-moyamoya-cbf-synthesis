@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 .venv/
+.venv_slide_ml/
 venv/
 env/
 *.egg-info/
@@ -91,3 +92,80 @@ week7_subject_masks/
 *.nii
 *.nii.gz
 # Remove the two lines above if you want to track small NIfTI configs
+
+# More image / figure / document formats (code repo should hold no diagrams or docs)
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.eps
+*.tif
+*.tiff
+*.bmp
+*.pdf
+*.csv
+*.zip
+*.tips
+
+# Paper / manuscript sources and LaTeX build artifacts (papers live elsewhere, not in the code repo)
+*.tex
+*.bib
+*.aux
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.out
+
+# Environment / editor / remote-dev caches
+.TinyTeX/
+.cursor-server/
+.vscode-server/
+.local/
+julih_venv/
+myenv/
+venv_affine/
+.sam_cbf_venv/
+.venv_2020/
+
+# Backups
+latestversion_backup_*/
+
+# Raw / patient imaging data and derived data dirs (never commit PHI-adjacent data)
+moyamoya_*_nifti/
+moyamoya_*_dicom/
+pre_scans
+post_scans
+
+# Regenerable results, figures, and evaluation-output directories
+Results/
+results/
+results_*/
+week*_stats/
+week*_kfold*/
+roi_summary_tables/
+demographics_figures/
+qualitative_review/
+subgroup_equity_experiments/
+visual_checks/
+VLMCSVFILES/
+**/Mask evaluations/
+**/differences/
+
+# Third-party cloned codebases (external deps, not our own code)
+third_party_foundation_3d/Med3DVLM/
+third_party_foundation_3d/SAM-Med3D/
+third_party_foundation_3d/STU-Net-*/
+third_party_foundation_3d/*_output/
+third_party_foundation_3d/*results/
+third_party_foundation_3d/med3dvlm_week7_cvr/
+
+# Misc vendor installers, one-off logs
+Miniconda3-latest-*.sh
+*_nohup.out
+nohup.out
+
+# Exceptions: keep the curated public code-release bundle's docs (overrides *.md / *.txt above)
+!mlhc_code_release/README.md
+!mlhc_code_release/requirements.txt
