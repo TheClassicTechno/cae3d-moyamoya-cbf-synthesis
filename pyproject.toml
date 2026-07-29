@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moyamoya-cvr"
+version = "0.1.0"
+description = "3D synthesis of post-acetazolamide cerebral blood flow maps from baseline ASL MRI in Moyamoya disease"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Juli Huang" },
+]
+dependencies = [
+    "torch==2.10.0",
+    "torchvision==0.25.0",  # only PyPI-compatible pairing with torch==2.10.0; unused directly
+    "monai==1.5.2",
+    "dipy==1.11.0",
+    "nibabel==5.3.3",
+    "scikit-image==0.26.0",
+    "scikit-learn==1.8.0",
+    "scipy==1.17.0",
+    "numpy==2.4.2",
+    "pandas==3.0.3",
+    "matplotlib==3.10.8",
+    "matplotlib-venn==1.1.2",
+    "seaborn==0.13.2",
+    "tqdm==4.67.3",
+    "einops==0.8.2",
+    "torchio==0.21.3",
+    "SimpleITK==2.5.3",
+    "h5py==3.15.1",
+    "openpyxl==3.1.5",
+    "statsmodels",
+    "natsort",
+]
+
+[project.optional-dependencies]
+foundation = [
+    "transformers",
+    "huggingface_hub",
+    "segment-anything",
+]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
