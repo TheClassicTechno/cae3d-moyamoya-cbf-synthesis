@@ -12,10 +12,18 @@ Improvements:
 Based on: difusion3dtips.txt recommendations
 """
 
+import os
 import os, sys, glob, json, random, time
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 import torch
 import torch.nn as nn
@@ -50,7 +58,7 @@ def pre_to_post_path(pre_path: str) -> str:
 
 
 def load_volume_week7(nii_path: str, pad_shape=(96, 112, 96)) -> np.ndarray:
-    sys.path.insert(0, '/data1/julih/scripts')
+    sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
     from week7_preprocess import load_volume, TARGET_SHAPE
     vol = load_volume(nii_path, target_shape=TARGET_SHAPE, apply_mask=True, minmax=True)
     if vol.shape != pad_shape:
@@ -334,8 +342,8 @@ def evaluate_model(model, loader, n_timesteps_train, n_steps_ddim, betas, alphas
     mae_list, ssim_list, psnr_list = [], [], []
     if use_week7:
         import sys
-        if "/data1/julih/scripts" not in sys.path:
-            sys.path.insert(0, "/data1/julih/scripts")
+        if os.path.join(_REPO_ROOT, "scripts") not in sys.path:
+            sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
         from week7_preprocess import metrics_in_brain
 
     with torch.no_grad():
@@ -389,7 +397,15 @@ def main():
     print("IMPROVED 3D RESIDUAL DIFFUSION WITH TIPS")
     print("="*70)
     
-    use_week7 = os.environ.get('WEEK7', '').lower() in ('1', 'true', 'yes') or '--week7' in sys.argv
+    sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
+    from week7_preprocess import is_env_flag, is_week7_kfold, get_kfold_seed
+    use_week7 = (
+        is_env_flag('WEEK7')
+        or '--week7' in sys.argv
+        or is_week7_kfold()
+    )
+    seed = get_kfold_seed()
+
     CONFIG = {
         'target_size': (96, 112, 96) if use_week7 else (128, 128, 64),
         'patch_size': (48, 48, 24) if use_week7 else (96, 96, 48),  # Week7: smaller patch to avoid OOM
@@ -403,12 +419,15 @@ def main():
         'residual_scale': 0.2,
         'schedule': 'cosine',
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-        'seed': int(os.environ.get('SEED', 42)),
+        'seed': seed,
         'use_week7': use_week7,
     }
-    use_phase2 = use_week7 and os.environ.get('WEEK7_REGION_WEIGHT', '').lower() in ('1', 'true', 'yes')
+    use_phase2 = use_week7 and is_env_flag('WEEK7_REGION_WEIGHT')
     ckpt_name = 'residual_diffusion_3d_tips_week7_best.pt' if use_week7 else 'residual_diffusion_3d_tips_best.pt'
     results_name = 'residual_diffusion_3d_tips_week7_phase2_results.json' if use_phase2 else ('residual_diffusion_3d_tips_week7_results.json' if use_week7 else 'residual_diffusion_3d_tips_results.json')
+    if use_week7:
+        from week7_preprocess import week7_kfold_suffix_paths
+        ckpt_name, results_name = week7_kfold_suffix_paths(ckpt_name, results_name)
     
     print(f"\nTips Implemented:")
     print(f"  ✅ DDIM sampling (25 steps instead of 500)")
@@ -426,6 +445,8 @@ def main():
     random.seed(CONFIG['seed'])
     np.random.seed(CONFIG['seed'])
     torch.manual_seed(CONFIG['seed'])
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(CONFIG['seed'])
     
     betas = make_beta_schedule(CONFIG['n_timesteps_train'], schedule=CONFIG['schedule'])
     alphas = 1.0 - betas
@@ -440,8 +461,10 @@ def main():
     # Load data
     print(f"\n📂 Loading data...")
     if use_week7:
-        sys.path.insert(0, '/data1/julih/scripts')
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
         from week7_data import get_week7_splits
+        from week7_preprocess import get_combined_split_path
+        print(f"  Split JSON: {get_combined_split_path()}")
         train_pairs, val_pairs, test_pairs = get_week7_splits()
         load_fn = lambda p: load_volume_week7(p, pad_shape=(96, 112, 96))
         train_items = [(a,b) for a,b in zip([p[0] for p in train_pairs], [p[1] for p in train_pairs]) if os.path.isfile(a) and os.path.isfile(b)]
@@ -449,7 +472,7 @@ def main():
         test_items = [(a,b) for a,b in zip([p[0] for p in test_pairs], [p[1] for p in test_pairs]) if os.path.isfile(a) and os.path.isfile(b)]
         print(f"  Week7: {len(train_items)} train / {len(val_items)} val / {len(test_items)} test")
     else:
-        data_dir = "/data1/julih"
+        data_dir = _REPO_ROOT
         all_pre = sorted(glob.glob(f"{data_dir}/pre/pre_*.nii.gz"))
         all_pre_paired = [p for p in all_pre if os.path.exists(pre_to_post_path(p))]
         print(f"  Found {len(all_pre_paired)} paired volumes")
@@ -584,8 +607,20 @@ def main():
     print(f"  SSIM: {test_results['ssim_mean']:.4f} ± {test_results['ssim_std']:.4f}")
     print(f"  PSNR: {test_results['psnr_mean']:.2f} ± {test_results['psnr_std']:.2f} dB")
     
+    payload = dict(test_results)
+    # Record minimal provenance so per-fold JSONs can be audited.
+    if use_week7:
+        payload["kfold"] = {
+            "fold": fold_idx if fold_env.isdigit() else None,
+            "split_path": os.environ.get("WEEK7_SPLIT_PATH", "").strip() or None,
+            "base_seed": base_seed,
+            "seed": CONFIG["seed"],
+        }
+        payload["n_train"] = len(train_items)
+        payload["n_val"] = len(val_items)
+        payload["n_test"] = len(test_items)
     with open(results_name, 'w') as f:
-        json.dump(test_results, f, indent=2)
+        json.dump(payload, f, indent=2)
     
     print(f"\n✅ Complete! Saved: {ckpt_name}, {results_name}")
     print("="*70)

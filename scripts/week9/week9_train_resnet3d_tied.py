@@ -9,6 +9,13 @@ import sys
 import json
 import random
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -21,7 +28,7 @@ from week7_preprocess import TARGET_SHAPE, metrics_in_brain
 
 from monai.networks.nets import ResNetFeatures
 
-DATA_DIR = "/data1/julih"
+DATA_DIR = _REPO_ROOT
 OUT_DIR = os.path.join(DATA_DIR, "scripts", "week9_results")
 os.makedirs(OUT_DIR, exist_ok=True)
 

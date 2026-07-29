@@ -7,7 +7,14 @@ import os
 import json
 import re
 
-ROOT = "/data1/julih"
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+ROOT = _REPO_ROOT
 TABLE_PATH = os.path.join(ROOT, "WEEK7_TABLE_RESULTS.md")
 
 # (path, display_name, "2D" | "3D") - order: 2D first, then 3D
@@ -32,6 +39,8 @@ RESULT_FILES = [
     (os.path.join(ROOT, "Diffusion_baseline_3D/ddpm_3d_week7_results.json"), "DDPM simple 3D", "3D"),
     (os.path.join(ROOT, "Diffusion_3D_Latent/cold_diffusion_latent_week7_results.json"), "v-prediction (latent) 3D", "3D"),
     (os.path.join(ROOT, "scripts/week7_results/week7_resnet3d_results.json"), "3D ResNet (MONAI)", "3D"),
+    (os.path.join(ROOT, "scripts/week7_results/week7_medicalnet_transfer_results.json"), "MedicalNet R18 pretrained (Med3D transfer)", "3D"),
+    (os.path.join(ROOT, "scripts/week7_results/week7_swin_unetr_ssl_results.json"), "Swin UNETR + SSL encoder (MONAI)", "3D"),
     (os.path.join(ROOT, "third_party_foundation_3d/med3dvlm_week7_cvr/med3dvlm_week7_results.json"), "Med3DVLM (DCFormer+CVR)", "3D"),
     (os.path.join(ROOT, "Diffusion_MAISI/run3d_week7/maisi_week7_results.json"), "MAISI 3D", "3D"),
 ]

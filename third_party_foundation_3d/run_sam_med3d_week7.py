@@ -8,9 +8,16 @@ import sys
 import json
 import shutil
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 SAM_ROOT = os.path.dirname(os.path.abspath(__file__))
-WEEK7_SPLIT = "/data1/julih/combined_subject_split.json"
-BRAIN_MASK = "/data1/julih/MNI152_T1_2mm_brain_mask_dil.nii.gz"
+WEEK7_SPLIT = os.path.join(_REPO_ROOT, "combined_subject_split.json")
+BRAIN_MASK = os.path.join(_REPO_ROOT, "MNI152_T1_2mm_brain_mask_dil.nii.gz")
 OUT_DIR = os.path.join(SAM_ROOT, "test_data", "week7_sam_run")
 IMAGES_DIR = os.path.join(OUT_DIR, "imagesVa")
 LABELS_DIR = os.path.join(OUT_DIR, "labelsVa")

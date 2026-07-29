@@ -25,6 +25,13 @@ import random
 import time
 from typing import List, Tuple, Optional
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
@@ -38,7 +45,7 @@ from monai.networks.nets import UNet
 from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
 
 # Import VAE and utilities from latent diffusion
-sys.path.append('/data1/julih/Diffusion_3D_Latent')
+sys.path.append(os.path.join(_REPO_ROOT, 'Diffusion_3D_Latent'))
 from vae_3d import VAE3D
 from utils import EMA, strict_normalize_volume
 
@@ -61,7 +68,7 @@ def load_full_volume(nii_path: str, target_size=(128, 128, 64)) -> np.ndarray:
 def load_volume_week7(nii_path: str, pad_shape=(96, 112, 96)) -> np.ndarray:
     """Load with Week7 preprocessing (91×109×91, brain mask, minmax) then pad to pad_shape."""
     import sys
-    sys.path.insert(0, '/data1/julih/scripts')
+    sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
     from week7_preprocess import load_volume, TARGET_SHAPE
     vol = load_volume(nii_path, target_shape=TARGET_SHAPE, apply_mask=True, minmax=True)
     if vol.shape != pad_shape:
@@ -400,6 +407,7 @@ def evaluate_model(model, vae_model, unet_model, test_items, n_timesteps_train, 
                   betas, alphas, alphas_bar_sqrt, one_minus_alphas_bar_sqrt,
                   residual_scale, target_size, device, load_fn=None):
     """Evaluate hybrid model on test set. If load_fn (e.g. Week7) given, use it to load volumes."""
+    import sys  # local import so sys is always bound (Bland–Altman block uses sys.path)
     model.eval()
     vae_model.eval()
     unet_model.eval()
@@ -435,9 +443,8 @@ def evaluate_model(model, vae_model, unet_model, test_items, n_timesteps_train, 
                 all_ground_truth.append(post_vol.flatten())
                 
                 if load_fn is not None:
-                    import sys
-                    if "/data1/julih/scripts" not in sys.path:
-                        sys.path.insert(0, "/data1/julih/scripts")
+                    if os.path.join(_REPO_ROOT, "scripts") not in sys.path:
+                        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
                     from week7_preprocess import metrics_in_brain
                     m = metrics_in_brain(pred_vol_np, post_vol, data_range=1.0)
                     mae_list.append(m["mae_mean"])
@@ -461,7 +468,7 @@ def evaluate_model(model, vae_model, unet_model, test_items, n_timesteps_train, 
     if len(all_predicted) > 0:
         all_predicted_flat = np.concatenate(all_predicted)
         all_ground_truth_flat = np.concatenate(all_ground_truth)
-        sys.path.append('/data1/julih/Diffusion_3D_Latent')
+        sys.path.append(os.path.join(_REPO_ROOT, 'Diffusion_3D_Latent'))
         from utils import bland_altman_analysis
         ba_results = bland_altman_analysis(all_predicted_flat, all_ground_truth_flat)
     else:
@@ -518,10 +525,12 @@ def main():
     np.random.seed(CONFIG['seed'])
     torch.manual_seed(CONFIG['seed'])
     
-    use_week7 = '--week7' in sys.argv or os.environ.get('WEEK7', '').lower() in ('1', 'true', 'yes')
+    sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
+    from week7_preprocess import is_env_flag, is_week7_kfold
+    use_week7 = '--week7' in sys.argv or is_env_flag('WEEK7') or is_week7_kfold()
     if use_week7:
         CONFIG['target_size'] = (96, 112, 96)
-        use_phase2 = os.environ.get('WEEK7_REGION_WEIGHT', '').lower() in ('1', 'true', 'yes')
+        use_phase2 = is_env_flag('WEEK7_REGION_WEIGHT')
         CONFIG['ckpt_name'] = 'hybrid_unet_diffusion_week7_best.pt'
         CONFIG['results_name'] = 'hybrid_unet_diffusion_week7_phase2_results.json' if use_phase2 else 'hybrid_unet_diffusion_week7_results.json'
         print("  Week7: 91×109×91 brain mask, pad 96×112×96, combined 2020-2023 split")
@@ -533,9 +542,9 @@ def main():
     print(f"\n Loading pre-trained models...")
     
     # Load VAE (Week7: prefer vae_3d_week7_best.pt if exists, else fallback to vae_3d_best.pt)
-    vae_path_week7 = '/data1/julih/Diffusion_3D_Latent/vae_3d_week7_best.pt'
-    vae_path = vae_path_week7 if use_week7 and os.path.exists(vae_path_week7) else '/data1/julih/Diffusion_3D_Latent/vae_3d_best.pt'
-    if use_week7 and vae_path == '/data1/julih/Diffusion_3D_Latent/vae_3d_best.pt':
+    vae_path_week7 = os.path.join(_REPO_ROOT, 'Diffusion_3D_Latent/vae_3d_week7_best.pt')
+    vae_path = vae_path_week7 if use_week7 and os.path.exists(vae_path_week7) else '<repo-root>/Diffusion_3D_Latent/vae_3d_best.pt'
+    if use_week7 and vae_path == os.path.join(_REPO_ROOT, 'Diffusion_3D_Latent/vae_3d_best.pt'):
         print("   Note: Using vae_3d_best.pt (Week7 VAE not found)")
     if not os.path.exists(vae_path):
         raise FileNotFoundError(f"VAE model not found: {vae_path}")
@@ -547,7 +556,7 @@ def main():
     print(f"   Loaded VAE from {vae_path}")
     
     # Load UNet (Week7: use week7 checkpoint)
-    unet_path = '/data1/julih/UNet_3D/unet_3d_week7_best.pt' if use_week7 else '/data1/julih/UNet_3D/unet_3d_best.pt'
+    unet_path = os.path.join(_REPO_ROOT, 'UNet_3D/unet_3d_week7_best.pt') if use_week7 else os.path.join(_REPO_ROOT, 'UNet_3D/unet_3d_best.pt')
     if not os.path.exists(unet_path):
         raise FileNotFoundError(f"UNet model not found: {unet_path}")
     unet_model = UNet(
@@ -570,7 +579,7 @@ def main():
     # Load data
     print(f"\n Loading data...")
     if use_week7:
-        sys.path.insert(0, '/data1/julih/scripts')
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
         from week7_data import get_week7_splits
         train_pairs, val_pairs, test_pairs = get_week7_splits()
         train_pre = [p[0] for p in train_pairs]
@@ -583,7 +592,7 @@ def main():
         load_fn = load_volume_week7
     else:
         load_fn = None
-    data_dir = "/data1/julih"
+    data_dir = _REPO_ROOT
     if not use_week7:
         all_pre = sorted(glob.glob(f"{data_dir}/pre/pre_*.nii.gz"))
         print(f"  Found {len(all_pre)} pre-scans")

@@ -5,7 +5,21 @@
 # 3. Copy result to week8_results/UNet_3D_seed456.json
 # 4. Run aggregate and stats
 set -e
-ROOT="/data1/julih"
+_find_repo_root() {
+  local d
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  while [[ ! -f "$d/pyproject.toml" ]]; do
+    local parent
+    parent="$(dirname "$d")"
+    if [[ "$parent" == "$d" ]]; then
+      echo "Could not locate repository root (pyproject.toml not found)" >&2
+      exit 1
+    fi
+    d="$parent"
+  done
+  echo "$d"
+}
+ROOT="$(_find_repo_root)"
 PYTHON="${ROOT}/miniconda3/envs/julih_monai/bin/python3"
 cd "$ROOT"
 

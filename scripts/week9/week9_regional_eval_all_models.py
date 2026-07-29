@@ -6,7 +6,7 @@ For each model: run test-set inference, write prediction NIfTIs to week8_regiona
 then run week7_regional_eval.run_from_pred_dir to produce week8_regional_<Model>.json.
 After this, run week9_delta_cbf_by_territory.py with all regional JSONs to get ΔCBF for every model.
 
-Run from /data1/julih:
+Run from <repo-root>:
   python scripts/week9/week9_regional_eval_all_models.py
   python scripts/week9/week9_regional_eval_all_models.py --only FNO_3D
 
@@ -17,13 +17,22 @@ Then:
 from __future__ import annotations
 
 import os
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+import os
 import sys
 import json
 import argparse
 import numpy as np
 import nibabel as nib
 
-ROOT = "/data1/julih"
+ROOT = _REPO_ROOT
 PRED_BASE = os.path.join(ROOT, "week8_regional_preds")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from week7_data import get_week7_splits, _subject_id_from_path, Week7VolumePairs3D
@@ -210,6 +219,82 @@ def write_pred_niftis_residual_3d(pred_dir: str) -> int:
             _write_pred_nifti(pred_vol, post_path, os.path.join(pred_dir, f"post_{sid}_pred.nii.gz"))
             n += 1
     print("Wrote", n, "pred NIfTIs for Residual_3D to", pred_dir)
+    return n
+
+
+def write_pred_niftis_residual_3d_tips(pred_dir: str) -> int:
+    """Residual Diffusion 3D with tips (DDIM + overlap; ImprovedResidualDiffusionNet3D). Week7 checkpoint."""
+    import torch
+    import importlib.util
+
+    res_dir = os.path.join(ROOT, "Diffusion_ResidualDiffusion_3D")
+    ckpt_path = os.path.join(res_dir, "residual_diffusion_3d_tips_week7_best.pt")
+    if not os.path.isfile(ckpt_path):
+        print("Skip Residual_3D_tips: checkpoint not found", ckpt_path)
+        return 0
+    tips_path = os.path.join(res_dir, "model_3d_with_tips.py")
+    spec = importlib.util.spec_from_file_location("residual_model_3d_tips", tips_path)
+    tips_m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tips_m)
+    ImprovedResidualDiffusionNet3D = tips_m.ImprovedResidualDiffusionNet3D
+    make_beta_schedule = tips_m.make_beta_schedule
+    predict_full_volume_with_overlap = tips_m.predict_full_volume_with_overlap
+    minmax_norm = tips_m.minmax_norm
+    load_volume_week7 = tips_m.load_volume_week7
+
+    n_timesteps_train = 500
+    n_steps_ddim = 25
+    residual_scale = 0.2
+    schedule = "cosine"
+    patch_size = (48, 48, 24)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    betas = make_beta_schedule(n_timesteps_train, schedule=schedule)
+    alphas = 1.0 - betas
+    alphas_bar = np.cumprod(alphas)
+    alphas_bar_sqrt = np.sqrt(alphas_bar)
+    one_minus_alphas_bar_sqrt = np.sqrt(1.0 - alphas_bar)
+    betas_t = torch.from_numpy(betas).float().to(device)
+    alphas_t = torch.from_numpy(alphas).float().to(device)
+    alphas_bar_sqrt_t = torch.from_numpy(alphas_bar_sqrt).float().to(device)
+    one_minus_alphas_bar_sqrt_t = torch.from_numpy(one_minus_alphas_bar_sqrt).float().to(device)
+
+    model = ImprovedResidualDiffusionNet3D(channels=(64, 128, 256)).to(device)
+    model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
+    model.eval()
+    os.makedirs(pred_dir, exist_ok=True)
+    _, _, test_pairs = get_week7_splits()
+    n = 0
+    with torch.no_grad():
+        for pre_path, post_path in test_pairs:
+            if not os.path.isfile(pre_path) or not os.path.isfile(post_path):
+                continue
+            sid = _subject_id_from_path(pre_path)
+            try:
+                pre_vol = minmax_norm(load_volume_week7(pre_path, pad_shape=(96, 112, 96)))
+            except Exception as e:
+                print("Skip", sid, e)
+                continue
+            pred_vol_np = predict_full_volume_with_overlap(
+                model,
+                pre_vol,
+                n_timesteps_train,
+                n_steps_ddim,
+                betas_t,
+                alphas_t,
+                alphas_bar_sqrt_t,
+                one_minus_alphas_bar_sqrt_t,
+                residual_scale,
+                patch_size=patch_size,
+                overlap=0.5,
+                device=device,
+            )
+            pred_vol_np = np.nan_to_num(pred_vol_np, nan=0.0, posinf=1.0, neginf=0.0)
+            pred_vol_np = np.clip(pred_vol_np, 0.0, 1.0)
+            pred_vol_np = pred_vol_np[: WEEK7_ORIGINAL[0], : WEEK7_ORIGINAL[1], : WEEK7_ORIGINAL[2]]
+            _write_pred_nifti(pred_vol_np, post_path, os.path.join(pred_dir, f"post_{sid}_pred.nii.gz"))
+            n += 1
+    print("Wrote", n, "pred NIfTIs for Residual_3D_tips to", pred_dir)
     return n
 
 
@@ -455,6 +540,7 @@ MODELS = {
     "UNet_3D": (write_pred_niftis_unet_3d, "UNet_3D"),
     "Cold_3D": (write_pred_niftis_cold_3d, "Cold_3D"),
     "Residual_3D": (write_pred_niftis_residual_3d, "Residual_3D"),
+    "Residual_3D_tips": (write_pred_niftis_residual_3d_tips, "Residual_3D_tips"),
     "DDPM_3D": (write_pred_niftis_ddpm_3d, "DDPM_3D"),
     "FNO_3D": (write_pred_niftis_fno_3d, "FNO_3D"),
     "Hybrid_3D": (write_pred_niftis_hybrid_3d, "Hybrid_3D"),

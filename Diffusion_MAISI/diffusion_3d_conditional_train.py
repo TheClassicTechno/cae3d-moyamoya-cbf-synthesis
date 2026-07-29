@@ -11,6 +11,13 @@ from torch.utils.data import Dataset, DataLoader
 import nibabel as nib
 import matplotlib.pyplot as plt
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 from monai.networks.nets import DiffusionModelUNet, UNet
 from monai.networks.schedulers import DDIMScheduler
 
@@ -41,7 +48,7 @@ def setup_logger(save_dir):
 def load_volume_week7(nii_path, pad_shape=(96, 112, 96)):
     """Week7: 91×109×91 brain mask + minmax, then pad to pad_shape."""
     import sys
-    sys.path.insert(0, '/data1/julih/scripts')
+    sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
     from week7_preprocess import load_volume, TARGET_SHAPE
     vol = load_volume(nii_path, target_shape=TARGET_SHAPE, apply_mask=True, minmax=True)
     if vol.shape != pad_shape:
@@ -215,7 +222,7 @@ def validate(model, scheduler, loader, device):
 def main():
     use_week7 = "--week7" in sys.argv or os.environ.get("WEEK7") == "1"
     if use_week7:
-        sys.path.insert(0, '/data1/julih/scripts')
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
         from week7_data import get_week7_splits
         train_pairs, val_pairs, test_pairs = get_week7_splits()
         train_pre = [p[0] for p in train_pairs]
@@ -224,10 +231,10 @@ def main():
         val_post = [p[1] for p in val_pairs]
         # Pad to 128³ so 64³ patches match MONAI DiffusionModelUNet spatial expectations
         load_fn = lambda p: load_volume_week7(p, pad_shape=(128, 128, 128))
-        RUN_DIR = "/data1/julih/Diffusion_MAISI/run3d_week7"
+        RUN_DIR = os.path.join(_REPO_ROOT, "Diffusion_MAISI/run3d_week7")
     else:
-        PRE_DIR = "/data/rydham/pre_scans"
-        POST_DIR = "/data/rydham/post_scans"
+        PRE_DIR = os.environ.get("MOYAMOYA_LEGACY_PRE_DIR", "pre_scans")
+        POST_DIR = os.environ.get("MOYAMOYA_LEGACY_POST_DIR", "post_scans")
         pre_files = sorted([os.path.join(PRE_DIR, f) for f in os.listdir(PRE_DIR) if f.endswith(".nii.gz")])
         post_files = sorted([os.path.join(POST_DIR, f) for f in os.listdir(POST_DIR) if f.endswith(".nii.gz")])
         assert len(pre_files) == len(post_files)
@@ -240,7 +247,7 @@ def main():
         val_pre = [pre_files[i] for i in val_idx]
         val_post = [post_files[i] for i in val_idx]
         load_fn = None
-        RUN_DIR = "/data/rydham/Diffusion_MAISI/run3d_patch64"
+        RUN_DIR = os.environ.get("MOYAMOYA_LEGACY_RUN_DIR", "Diffusion_MAISI/run3d_patch64")
 
     os.makedirs(RUN_DIR, exist_ok=True)
     logger = setup_logger(RUN_DIR)
@@ -306,7 +313,7 @@ def main():
     # Week7: run test set eval (center 64^3 patch per volume), save maisi_week7_results.json
     if use_week7 and os.path.isfile(best_path):
         logger.info("=== Week7 test set evaluation (center patch) ===")
-        sys.path.insert(0, "/data1/julih/scripts")
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
         from week7_data import get_week7_splits
         from week7_preprocess import metrics_in_brain
         _, _, test_pairs = get_week7_splits()

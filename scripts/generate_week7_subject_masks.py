@@ -7,10 +7,10 @@ Generate per-subject masks for Week 7 (Phase 3). Saves one mask per subject to a
   by writing {subject_id}.nii.gz into OUT_DIR with the same dimensions (91, 109, 91).
 
 Usage:
-  cd /data1/julih/scripts && python3 generate_week7_subject_masks.py
+  cd <repo-root>/scripts && python3 generate_week7_subject_masks.py
 
 Environment:
-  WEEK7_SUBJECT_MASKS_DIR  Output directory (default: /data1/julih/week7_subject_masks)
+  WEEK7_SUBJECT_MASKS_DIR  Output directory (default: <repo-root>/week7_subject_masks)
 """
 import os
 import sys
@@ -18,11 +18,18 @@ import re
 import nibabel as nib
 import numpy as np
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from week7_data import get_week7_splits
 from week7_preprocess import get_brain_mask, TARGET_SHAPE
 
-OUT_DIR_DEFAULT = "/data1/julih/week7_subject_masks"
+OUT_DIR_DEFAULT = os.path.join(_REPO_ROOT, "week7_subject_masks")
 
 
 def subject_id_from_path(pre_path: str) -> str:

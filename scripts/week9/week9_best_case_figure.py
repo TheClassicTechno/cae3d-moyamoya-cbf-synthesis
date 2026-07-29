@@ -7,7 +7,7 @@ the subject with best PSNR (or SSIM), and saves one figure: three panels (pre, p
 middle axial slice + caption with MAE, SSIM, PSNR.
 
 Usage (from repo root):
-  python scripts/week9/week9_best_case_figure.py --model unet3d --checkpoint scripts/week7_results/week7_unet3d_best.pt --output_dir week9_stats
+  python scripts/week9/week9_best_case_figure.py --model unet3d --output_dir week9_stats
   python scripts/week9/week9_best_case_figure.py --model resnet3d --output_dir week9_stats
 """
 
@@ -18,8 +18,9 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path("/data1/julih")
+ROOT = Path("<repo-root>")
 sys.path.insert(0, str(ROOT / "scripts"))
+from pipeline_model_registry import PRIMARY_RECON_CHECKPOINT
 from week7_data import get_week7_splits, _subject_id_from_path, Week7VolumePairs3D
 from week7_preprocess import TARGET_SHAPE, load_volume
 
@@ -44,8 +45,11 @@ def main():
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    ckpt = args.checkpoint
-    if not ckpt:
+    if args.checkpoint.strip():
+        ckpt = args.checkpoint
+    elif args.model == "unet3d":
+        ckpt = str(PRIMARY_RECON_CHECKPOINT)
+    else:
         ckpt = str(ROOT / "scripts" / "week7_results" / ("week7_%s_best.pt" % args.model))
     if not os.path.isfile(ckpt):
         print("Checkpoint not found:", ckpt)

@@ -16,6 +16,13 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fno_3d_cvr import (
     load_volume, pre_to_post, VolumePairs, VolumePairsFromPairs, SimpleFNO3D,
@@ -68,7 +75,7 @@ def main():
     ap.add_argument("--width", type=int, default=64)
     ap.add_argument("--ckpt", type=str, default="")
     ap.add_argument("--use-2020", action="store_true", help="Use 2020 Single-delay split JSON")
-    ap.add_argument("--split-2020-json", type=str, default="/data1/julih/2020_single_delay_split.json")
+    ap.add_argument("--split-2020-json", type=str, default=os.path.join(_REPO_ROOT, "2020_single_delay_split.json"))
     ap.add_argument("--combined-split-json", type=str, default="", help="Use combined (existing+2020) subject-level split; overrides --use-2020")
     ap.add_argument("--week7", action="store_true", help="Week7: 91x109x91 + brain mask, pad 96x112x96, same split as other Week7 models")
     args = ap.parse_args()
@@ -104,7 +111,7 @@ def main():
 
     region_weight_t = None
     if use_week7:
-        sys.path.insert(0, "/data1/julih/scripts")
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
         from week7_data import get_week7_splits
         from week7_preprocess import get_region_weight_mask_for_shape
         train_pairs, val_pairs, test_pairs = get_week7_splits()

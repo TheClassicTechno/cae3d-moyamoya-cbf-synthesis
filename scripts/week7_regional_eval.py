@@ -5,7 +5,7 @@ Supports (1) predictions from NIfTI dir, or (2) inference from script-based 3D m
 
 Usage:
   # From a directory of prediction NIfTIs (post_{id}_pred.nii.gz):
-  python week7_regional_eval.py --pred-dir /path/to/pred_niftis --masks-dir /data1/julih/Masks --out regional_week7.json
+  python week7_regional_eval.py --pred-dir /path/to/pred_niftis --masks-dir <repo-root>/Masks --out regional_week7.json
 
   # From a trained script model (runs test set inference, then regional metrics):
   python week7_regional_eval.py --model unet3d --out regional_week7_unet3d.json
@@ -22,6 +22,13 @@ import nibabel as nib
 from scipy.ndimage import zoom
 from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from week7_data import get_week7_splits, _subject_id_from_path, Week7VolumePairs3D
 from week7_preprocess import (
@@ -30,9 +37,9 @@ from week7_preprocess import (
     load_territory_masks,
 )
 
-DATA_DIR = "/data1/julih"
-MASKS_DIR_DEFAULT = "/data1/julih/Masks"
-MASKS_DIR_RYDHAM = "/data/rydham/Masks"
+DATA_DIR = _REPO_ROOT
+MASKS_DIR_DEFAULT = os.path.join(_REPO_ROOT, "Masks")
+MASKS_DIR_EXTRA = os.environ.get("MOYAMOYA_MASKS_DIR", "")
 
 
 def load_nifti(path):
@@ -108,7 +115,7 @@ def compute_regional_metrics(pred_vol, gt_vol, territory_masks, data_range=1.0):
 def run_from_pred_dir(pred_dir, post_dir, masks_dir, out_path):
     """Load test pairs, for each load pred NIfTI and GT, compute regional metrics."""
     _, _, test_pairs = get_week7_splits()
-    masks_dir = masks_dir or (MASKS_DIR_DEFAULT if os.path.isdir(MASKS_DIR_DEFAULT) else MASKS_DIR_RYDHAM)
+    masks_dir = masks_dir or (MASKS_DIR_DEFAULT if os.path.isdir(MASKS_DIR_DEFAULT) else MASKS_DIR_EXTRA)
     if not os.path.isdir(masks_dir):
         print("Masks dir not found:", masks_dir)
         return
@@ -179,7 +186,7 @@ def run_from_model(model_name, checkpoint_path, masks_dir, out_path):
     from torch.utils.data import DataLoader
 
     _, _, test_pairs = get_week7_splits()
-    masks_dir = masks_dir or (MASKS_DIR_DEFAULT if os.path.isdir(MASKS_DIR_DEFAULT) else MASKS_DIR_RYDHAM)
+    masks_dir = masks_dir or (MASKS_DIR_DEFAULT if os.path.isdir(MASKS_DIR_DEFAULT) else MASKS_DIR_EXTRA)
     if not os.path.isdir(masks_dir):
         print("Masks dir not found:", masks_dir)
         return
@@ -259,7 +266,7 @@ def main():
     ap.add_argument("--post-dir", default=os.path.join(DATA_DIR, "post"), help="GT post NIfTIs if not in pred-dir")
     ap.add_argument("--model", default="", choices=("", "unet3d", "resnet3d"), help="Run inference with this model")
     ap.add_argument("--checkpoint", default="", help="Path to model checkpoint (optional: defaults to week7_unet3d_best.pt or week7_resnet3d_best.pt; use for variants e.g. week7_unet3d_best_lowbaseline.pt)")
-    ap.add_argument("--masks-dir", default="", help="MNI territory masks (default: /data1/julih/Masks)")
+    ap.add_argument("--masks-dir", default="", help="MNI territory masks (default: <repo-root>/Masks)")
     ap.add_argument("--out", default="regional_week7.json")
     args = ap.parse_args()
 

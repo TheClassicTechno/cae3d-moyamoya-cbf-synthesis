@@ -12,6 +12,13 @@ import random
 import time
 import sys
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -25,7 +32,7 @@ from cold_diffusion_latent import (
 )
 
 # Add paths
-sys.path.append('/data1/julih/Diffusion_3D_Latent')
+sys.path.append(os.path.join(_REPO_ROOT, 'Diffusion_3D_Latent'))
 
 def main():
     use_week7 = '--week7' in sys.argv or os.environ.get('WEEK7') == '1'
@@ -45,11 +52,11 @@ def main():
             'device': 'cuda' if torch.cuda.is_available() else 'cpu',
             'seed': 42,
         }
-        sys.path.insert(0, '/data1/julih/scripts')
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
         from week7_data import get_week7_splits
         _, _, test_pairs = get_week7_splits()
         test_items = test_pairs
-        sys.path.insert(0, '/data1/julih/Diffusion_3D_Latent')
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'Diffusion_3D_Latent'))
         from week7_loader import load_volume_week7
         load_fn = lambda p: load_volume_week7(p, pad_shape=(96, 112, 96))
         results_fname = 'cold_diffusion_latent_week7_results.json'
@@ -65,7 +72,7 @@ def main():
             'device': 'cuda' if torch.cuda.is_available() else 'cpu',
             'seed': 42,
         }
-        data_dir = "/data1/julih"
+        data_dir = _REPO_ROOT
         all_pre = sorted(glob.glob(f"{data_dir}/pre/pre_*.nii.gz"))
         all_pre_paired = [p for p in all_pre if os.path.exists(pre_to_post_path(p))]
         random.shuffle(all_pre_paired)

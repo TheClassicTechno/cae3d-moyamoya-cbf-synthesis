@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path("/data1/julih")
+ROOT = Path("<repo-root>")
 DEFAULT_DELTA_CSV = ROOT / "week9_stats" / "delta_cbf_by_territory.csv"
 DEFAULT_OUT = ROOT / "week9_stats"
 

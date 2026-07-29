@@ -3,12 +3,26 @@
 # Use after the main 3-seed run completed FNO seed 42 but stopped before 123/456.
 
 set -e
-ROOT="/data1/julih"
+_find_repo_root() {
+  local d
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  while [[ ! -f "$d/pyproject.toml" ]]; do
+    local parent
+    parent="$(dirname "$d")"
+    if [[ "$parent" == "$d" ]]; then
+      echo "Could not locate repository root (pyproject.toml not found)" >&2
+      exit 1
+    fi
+    d="$parent"
+  done
+  echo "$d"
+}
+ROOT="$(_find_repo_root)"
 cd "$ROOT"
 mkdir -p week8_results
 
 PYTHON="python3"
-[[ -x /data1/julih/miniconda3/envs/julih_monai/bin/python3 ]] && PYTHON="/data1/julih/miniconda3/envs/julih_monai/bin/python3"
+[[ -x "${ROOT}/miniconda3/envs/julih_monai/bin/python3" ]] && PYTHON="${ROOT}/miniconda3/envs/julih_monai/bin/python3"
 export PYTHON
 export WEEK7=1
 unset WEEK7_REGION_WEIGHT

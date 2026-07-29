@@ -2,11 +2,25 @@
 """
 Train 3D UNet with Week 7 pipeline: combined 2020-2023, brain mask, 91x109x91, same augmentations.
 Uses MONAI UNet (spatial_dims=3). Saves checkpoint and metrics to scripts/week7_results/.
+
+Environment (optional):
+  WEEK7_EVAL_ONLY=1 — skip training; load WEEK7_CKPT (default week7_unet3d_best.pt) and run test evaluate();
+    set WEEK7_EVAL_OUT_JSON to write a structured JSON (e.g. under week9_stats/eval_runs/).
+  WEEK7_CKPT_NAME — override checkpoint filename saved during training (avoids overwriting week7_unet3d_best.pt).
+  WEEK7_RESULTS_JSON — override path for the final test metrics JSON (basename under OUT_DIR or absolute).
 """
 import os
 import sys
 import json
 import random
+import time
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 import numpy as np
 import torch
@@ -29,7 +43,7 @@ from week7_preprocess import (
 from monai.networks.nets import UNet
 from monai.losses import SSIMLoss
 
-DATA_DIR = "/data1/julih"
+DATA_DIR = _REPO_ROOT
 OUT_DIR = os.path.join(DATA_DIR, "scripts", "week7_results")
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -116,11 +130,22 @@ def train_epoch(
             mask_batch = w
         optimizer.zero_grad()
         out = model(pre)
+        loss_type = os.environ.get("WEEK7_LOSS", "l1_ssim").strip().lower()
         if mask_batch is not None:
             l1_masked = (torch.abs(out - post) * mask_batch).sum() / (mask_batch.sum() + 1e-8)
-            loss = l1_masked + criterion_ssim(out, post)
+            if loss_type == "l1_only":
+                loss = l1_masked
+            elif loss_type == "ssim_only":
+                loss = criterion_ssim(out, post)
+            else:
+                loss = l1_masked + criterion_ssim(out, post)
         else:
-            loss = criterion_l1(out, post) + criterion_ssim(out, post)
+            if loss_type == "l1_only":
+                loss = criterion_l1(out, post)
+            elif loss_type == "ssim_only":
+                loss = criterion_ssim(out, post)
+            else:
+                loss = criterion_l1(out, post) + criterion_ssim(out, post)
         if region_masks_t is not None and regional_loss_weight > 0:
             oh, ow, od = TARGET_SHAPE
             pred_crop = out[:, :, :oh, :ow, :od]
@@ -166,7 +191,49 @@ def evaluate(model, loader):
     }
 
 
+def _eval_only_unet3d():
+    """WEEK7_EVAL_ONLY=1: load checkpoint, run test-set metrics (same as post-train evaluate).
+
+    Env:
+      WEEK7_CKPT — checkpoint path (default: OUT_DIR/week7_unet3d_best.pt)
+      WEEK7_EVAL_OUT_JSON — if set, write JSON with metrics (recommended under week9_stats/eval_runs/)
+    """
+    _, _, test_pairs = get_week7_splits()
+    test_ds = Week7VolumePairs3D(test_pairs, augment=False)
+    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+    model = make_unet_3d().to(DEVICE)
+    ckpt_path = os.environ.get("WEEK7_CKPT", "").strip() or os.path.join(OUT_DIR, "week7_unet3d_best.pt")
+    if not os.path.isfile(ckpt_path):
+        print("Eval-only: checkpoint not found:", ckpt_path)
+        sys.exit(1)
+    ckpt = torch.load(ckpt_path, map_location=DEVICE)
+    model.load_state_dict(ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt)
+    test_metrics = evaluate(model, test_loader)
+    print("Eval-only test:", test_metrics, "ckpt=", ckpt_path)
+    out_json = os.environ.get("WEEK7_EVAL_OUT_JSON", "").strip()
+    if out_json:
+        os.makedirs(os.path.dirname(out_json) or ".", exist_ok=True)
+        payload = {
+            "model": "week7_unet3d",
+            "split": "test",
+            "protocol_note": (
+                "Metrics use get_week7_splits() test set (2020–2023 combined protocol). "
+                "This is not the Week 11 table (2020–2024, seed-aggregated cohort means)."
+            ),
+            "checkpoint": ckpt_path,
+            "test_metrics": test_metrics,
+            "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        with open(out_json, "w") as f:
+            json.dump(payload, f, indent=2)
+        print("Wrote", out_json)
+
+
 def main():
+    if os.environ.get("WEEK7_EVAL_ONLY", "").lower() in ("1", "true", "yes"):
+        _eval_only_unet3d()
+        return
+
     use_subject_masks = os.environ.get("WEEK7_SUBJECT_MASKS", "").lower() in ("1", "true", "yes")
     print("Week7 3D UNet: combined 2020-2023, brain mask, 91x109x91, same aug" + (" + subject masks" if use_subject_masks else ""))
     train_pairs, val_pairs, test_pairs = get_week7_splits()
@@ -227,14 +294,22 @@ def main():
             regional_loss_weight = 0.0
 
     # Checkpoint filename: keep week7_unet3d_best.pt for Phase 1 only; variants get distinct files
+    loss_type = os.environ.get("WEEK7_LOSS", "l1_ssim").strip().lower()
     use_region_env = os.environ.get("WEEK7_REGION_WEIGHT", "").lower() in ("1", "true", "yes")
     use_phase2_or_3 = use_region_env or use_subject_masks
-    if use_low_baseline:
+    if loss_type == "l1_only":
+        ckpt_name = "week7_unet3d_best_l1_only.pt"
+    elif loss_type == "ssim_only":
+        ckpt_name = "week7_unet3d_best_ssim_only.pt"
+    elif use_low_baseline:
         ckpt_name = "week7_unet3d_best_lowbaseline.pt"
     elif use_phase2_or_3:
         ckpt_name = "week7_unet3d_best_phase2_phase3.pt"
     else:
         ckpt_name = "week7_unet3d_best.pt"
+
+    if os.environ.get("WEEK7_CKPT_NAME", "").strip():
+        ckpt_name = os.environ.get("WEEK7_CKPT_NAME").strip()
 
     best_val_psnr = -1.0
     log_val = os.environ.get("WEEK7_LOG_VAL", "").lower() in ("1", "true", "yes")
@@ -273,16 +348,28 @@ def main():
         if (ep + 1) % 10 == 0:
             print(f"Epoch {ep+1} loss={loss:.4f} val MAE={metrics['mae_mean']:.4f} SSIM={metrics['ssim_mean']:.4f} PSNR={metrics['psnr_mean']:.2f}")
 
-    ckpt = torch.load(os.path.join(OUT_DIR, ckpt_name), map_location=DEVICE)
+    ckpt_full = os.path.join(OUT_DIR, ckpt_name)
+    print("Best checkpoint:", ckpt_full, "best_val_psnr=%.4f" % best_val_psnr)
+    ckpt = torch.load(ckpt_full, map_location=DEVICE)
     model.load_state_dict(ckpt["model"])
     test_metrics = evaluate(model, test_loader)
     print("Test:", test_metrics)
     use_region = os.environ.get("WEEK7_REGION_WEIGHT", "").lower() in ("1", "true", "yes")
     use_subject = os.environ.get("WEEK7_SUBJECT_MASKS", "").lower() in ("1", "true", "yes")
-    out_name = "week7_unet3d_phase2_phase3_results.json" if (use_region or use_subject) else "week7_unet3d_results.json"
-    with open(os.path.join(OUT_DIR, out_name), "w") as f:
+    if loss_type == "l1_only":
+        out_name = "week7_unet3d_l1_only_results.json"
+    elif loss_type == "ssim_only":
+        out_name = "week7_unet3d_ssim_only_results.json"
+    else:
+        out_name = "week7_unet3d_phase2_phase3_results.json" if (use_region or use_subject) else "week7_unet3d_results.json"
+    results_override = os.environ.get("WEEK7_RESULTS_JSON", "").strip()
+    if results_override:
+        out_path = results_override if os.path.isabs(results_override) else os.path.join(OUT_DIR, results_override)
+    else:
+        out_path = os.path.join(OUT_DIR, out_name)
+    with open(out_path, "w") as f:
         json.dump(test_metrics, f, indent=2)
-    print("Saved", os.path.join(OUT_DIR, out_name))
+    print("Saved", out_path)
     if log_val and val_log:
         log_name = "week7_unet3d_phase2_phase3_val_log.json" if (use_region or use_subject) else "week7_unet3d_val_log.json"
         with open(os.path.join(OUT_DIR, log_name), "w") as f:

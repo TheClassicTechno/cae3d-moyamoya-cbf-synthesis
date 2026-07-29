@@ -7,6 +7,13 @@ import numpy as np
 import torch
 from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 
 def make_cosine_schedule(n_timesteps=200):
     """Cosine degradation schedule. alpha[t] from 0 (t=0, clean post) to 1 (t=T, pre)."""
@@ -88,8 +95,8 @@ def evaluate_model(model, vae_model, test_items, n_timesteps_train, n_steps_ddim
                 all_ground_truth.append(post_slice.flatten())
                 if load_fn is not None:
                     import sys
-                    if "/data1/julih/scripts" not in sys.path:
-                        sys.path.insert(0, "/data1/julih/scripts")
+                    if os.path.join(_REPO_ROOT, "scripts") not in sys.path:
+                        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
                     from week7_preprocess import metrics_in_brain
                     m = metrics_in_brain(pred_slice, post_slice, data_range=1.0)
                     mae_list.append(m["mae_mean"])

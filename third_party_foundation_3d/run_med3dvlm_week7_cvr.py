@@ -1,16 +1,37 @@
 #!/usr/bin/env python3
 """
+Fair baseline: train on OUR pre→post task (same splits as week7_train_unet3d).
+See third_party_foundation_3d/FOUNDATION_PRE_TO_POST_FINETUNING.md for what is / is not comparable.
+
 Train/finetune Med3DVLM DCFormer encoder + 3D decoder for Week7 CVR (pre->post).
 - Encoder: DCFormer (decomp_small) with input (128,128,128); encoder kept or finetuned.
 - Decoder: ConvTranspose3d from encoder features to 1 channel, then interpolate to 91x109x91.
 - Data: Week7 get_week7_splits + load_volume(91,109,91); resize to 128^3 for encoder; loss on 91x109x91.
+
+Optional structured clinical text (no radiology reports): after running
+  python3 scripts/build_moyamoya_registry_metadata.py --write-vlm-prompts
+use VLMCSVFILES/moyamoya_structured_prompts_for_vlm.jsonl keyed by subject_id if extending
+this script with a text encoder or prompt-tuning (not wired in by default).
+
 Run from repo root with PYTHONPATH including scripts and Med3DVLM:
-  cd /data1/julih && PYTHONPATH=/data1/julih/scripts:/data1/julih/third_party_foundation_3d/Med3DVLM python3 third_party_foundation_3d/run_med3dvlm_week7_cvr.py
+  cd <repo-root> && PYTHONPATH=<repo-root>/scripts:<repo-root>/third_party_foundation_3d/Med3DVLM python3 third_party_foundation_3d/run_med3dvlm_week7_cvr.py
+
+Encoder: default frozen (decoder-only). **Unfreeze DCFormer** for stronger adaptation:
+  MED3DVLM_FREEZE_ENCODER=0 python3 .../run_med3dvlm_week7_cvr.py --seeds 42,123,456
+Checkpoints/JSONs are suffixed with enc_frozen vs enc_train so runs do not overwrite.
 """
 import os
 import sys
 import json
 import random
+import argparse
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 import numpy as np
 import torch
@@ -19,8 +40,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
 
-# Week7 data (run from /data1/julih)
-ROOT = "/data1/julih"
+# Week7 data (run from <repo-root>)
+ROOT = _REPO_ROOT
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 sys.path.insert(0, os.path.join(ROOT, "third_party_foundation_3d", "Med3DVLM"))
 
@@ -44,8 +65,13 @@ ENC_SIZE = (128, 128, 128)
 TARGET_SHAPE_3D = TARGET_SHAPE  # (91, 109, 91)
 BATCH_SIZE = 2
 EPOCHS = 30
-LR = 1e-4
-FREEZE_ENCODER = True  # set False to finetune encoder
+LR = float(os.environ.get("MED3DVLM_LR", "1e-4"))
+
+
+def med3dvlm_freeze_encoder_from_env() -> bool:
+    """Default True (decoder-only). Set MED3DVLM_FREEZE_ENCODER=0|false|unfreeze to train encoder + decoder."""
+    v = os.environ.get("MED3DVLM_FREEZE_ENCODER", "1").strip().lower()
+    return v not in ("0", "false", "no", "unfreeze")
 
 
 class CVRDecoder3D(nn.Module):
@@ -153,17 +179,26 @@ def evaluate(model, loader):
     }
 
 
-def main():
-    print("Med3DVLM DCFormer + decoder for Week7 CVR (pre->post)")
+def train_eval_one_seed(seed: int, freeze_encoder: bool, enc_tag: str) -> dict:
+    """Full train + test for one RNG seed; returns test metric dict."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    print(
+        "Med3DVLM DCFormer + decoder for Week7 CVR (pre->post), seed=%s, freeze_encoder=%s (%s)"
+        % (seed, freeze_encoder, enc_tag)
+    )
     train_pairs, val_pairs, test_pairs = get_week7_splits()
     train_ds = Week7VolumePairs3D(train_pairs, augment=True)
     val_ds = Week7VolumePairs3D(val_pairs, augment=False)
     test_ds = Week7VolumePairs3D(test_pairs, augment=False)
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, num_workers=0)
-    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, num_workers=0)
+    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-    model = DCFormerCVR(input_size=ENC_SIZE, freeze_encoder=FREEZE_ENCODER).to(DEVICE)
+    ckpt_path = os.path.join(OUT_DIR, "med3dvlm_cvr_best_seed%d_%s.pt" % (seed, enc_tag))
+    model = DCFormerCVR(input_size=ENC_SIZE, freeze_encoder=freeze_encoder).to(DEVICE)
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.Adam(params, lr=LR)
     criterion = nn.L1Loss()
@@ -177,20 +212,69 @@ def main():
         metrics = evaluate(model, val_loader)
         if metrics["psnr_mean"] > best_val_psnr:
             best_val_psnr = metrics["psnr_mean"]
-            torch.save({"model": model.state_dict(), "epoch": ep}, os.path.join(OUT_DIR, "med3dvlm_cvr_best.pt"))
+            torch.save({"model": model.state_dict(), "epoch": ep, "seed": seed}, ckpt_path)
         if (ep + 1) % 5 == 0:
             print(f"Epoch {ep+1} loss={loss:.4f} val MAE={metrics['mae_mean']:.4f} SSIM={metrics['ssim_mean']:.4f} PSNR={metrics['psnr_mean']:.2f}")
 
-    ckpt = torch.load(os.path.join(OUT_DIR, "med3dvlm_cvr_best.pt"), map_location=DEVICE)
+    ckpt = torch.load(ckpt_path, map_location=DEVICE)
     model.load_state_dict(ckpt["model"])
     test_metrics = evaluate(model, test_loader)
-    print("Test:", test_metrics)
+    test_metrics["seed"] = seed
+    test_metrics["freeze_encoder"] = freeze_encoder
+    test_metrics["encoder_tag"] = enc_tag
+    print("Test (seed %d):" % seed, test_metrics)
+    return test_metrics
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Med3DVLM DCFormer + decoder for Week7 pre->post CBF.")
+    ap.add_argument(
+        "--seeds",
+        type=str,
+        default="42",
+        help="Comma-separated training seeds (e.g. 42,123,456). Matches main paper multi-seed reporting.",
+    )
+    args = ap.parse_args()
+    seeds = [int(s.strip()) for s in args.seeds.split(",") if s.strip()]
+    freeze_encoder = med3dvlm_freeze_encoder_from_env()
+    enc_tag = "enc_frozen" if freeze_encoder else "enc_train"
     use_region = os.environ.get("WEEK7_REGION_WEIGHT", "").lower() in ("1", "true", "yes")
-    out_name = "med3dvlm_week7_phase2_results.json" if use_region else "med3dvlm_week7_results.json"
-    out_json = os.path.join(OUT_DIR, out_name)
-    with open(out_json, "w") as f:
-        json.dump(test_metrics, f, indent=2)
-    print("Saved", out_json)
+    stem = "med3dvlm_week7_phase2" if use_region else "med3dvlm_week7"
+    out_name = "%s_results_%s.json" % (stem, enc_tag)
+
+    all_metrics = []
+    for sd in seeds:
+        all_metrics.append(train_eval_one_seed(sd, freeze_encoder, enc_tag))
+        if len(seeds) > 1:
+            out_json = os.path.join(OUT_DIR, out_name.replace(".json", "_seed%d.json" % sd))
+            with open(out_json, "w") as f:
+                json.dump(all_metrics[-1], f, indent=2)
+            print("Saved", out_json)
+
+    if len(seeds) == 1:
+        out_json = os.path.join(OUT_DIR, out_name)
+        with open(out_json, "w") as f:
+            json.dump(all_metrics[0], f, indent=2)
+        print("Saved", out_json)
+    else:
+        agg = {
+            "seeds": seeds,
+            "n_seeds": len(seeds),
+            "freeze_encoder": freeze_encoder,
+            "encoder_tag": enc_tag,
+            "lr": LR,
+            "mae_mean": float(np.mean([m["mae_mean"] for m in all_metrics])),
+            "mae_std": float(np.std([m["mae_mean"] for m in all_metrics])),
+            "ssim_mean": float(np.mean([m["ssim_mean"] for m in all_metrics])),
+            "ssim_std": float(np.std([m["ssim_mean"] for m in all_metrics])),
+            "psnr_mean": float(np.mean([m["psnr_mean"] for m in all_metrics])),
+            "psnr_std": float(np.std([m["psnr_mean"] for m in all_metrics])),
+            "per_seed": all_metrics,
+        }
+        multi_path = os.path.join(OUT_DIR, out_name.replace(".json", "_multiseed.json"))
+        with open(multi_path, "w") as f:
+            json.dump(agg, f, indent=2)
+        print("Saved aggregate", multi_path)
 
 
 if __name__ == "__main__":

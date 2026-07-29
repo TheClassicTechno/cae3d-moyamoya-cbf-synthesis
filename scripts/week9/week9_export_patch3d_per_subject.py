@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
-# Export per-subject metrics for Patch_3D (Week7). Run from /data1/julih.
-# Writes week8_per_subject_metrics/Patch_3D_<subject_id>.json
+# Export per-subject metrics for Patch_3D (Week7). Run from <repo-root>.
+# Writes <out_dir>/Patch_3D_<subject_id>.json
 import os
 import sys
 import json
-ROOT = "/data1/julih"
-OUT_DIR = os.path.join(ROOT, "week8_per_subject_metrics")
-os.makedirs(OUT_DIR, exist_ok=True)
+import argparse
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+ROOT = _REPO_ROOT
+DEFAULT_OUT = os.path.join(ROOT, "week8_per_subject_metrics")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
-from week7_data import get_week7_splits, _subject_id_from_path
-from week7_preprocess import metrics_in_brain, get_brain_mask
+from week7_preprocess import (
+    metrics_in_brain,
+    get_brain_mask,
+    collect_pre_post_quads_by_splits,
+)
 import numpy as np
 import torch
 WEEK7_ORIGINAL = (91, 109, 91)
@@ -37,6 +48,19 @@ def load_volume_week7(nii_path, pad_shape=(96, 96, 96)):
     return vol.astype(np.float32)
 
 def main():
+    ap = argparse.ArgumentParser(description="Patch_3D per-subject metrics export")
+    ap.add_argument("--out-dir", default=DEFAULT_OUT, help="Output directory for JSON files")
+    ap.add_argument(
+        "--splits",
+        default="test",
+        help="Comma-separated: train,val,test",
+    )
+    args = ap.parse_args()
+    out_dir = args.out_dir
+    os.makedirs(out_dir, exist_ok=True)
+    split_keys = [x.strip() for x in args.splits.split(",") if x.strip()]
+    quads = collect_pre_post_quads_by_splits(split_keys)
+
     patch_dir = os.path.join(ROOT, "Diffusion_3D_PatchVolume")
     sys.path.insert(0, patch_dir)
     sys.path.insert(0, os.path.join(ROOT, "Diffusion_3D_Latent"))
@@ -57,13 +81,11 @@ def main():
     ).to(device)
     vae_model.load_state_dict(torch.load(vae_ckpt, map_location=device))
     vae_model.eval()
-    _, _, test_pairs = get_week7_splits()
     n = 0
     with torch.no_grad():
-        for pre_p, post_p in test_pairs:
+        for sid, pre_p, post_p, split_name in quads:
             if not os.path.isfile(pre_p) or not os.path.isfile(post_p):
                 continue
-            sid = _subject_id_from_path(pre_p)
             try:
                 pre_vol = strict_normalize_volume(load_volume_week7(pre_p, pad_shape=target_size))
                 post_vol = strict_normalize_volume(load_volume_week7(post_p, pad_shape=target_size))
@@ -95,16 +117,17 @@ def main():
             out = {
                 "model": "Patch_3D",
                 "subject_id": sid,
+                "split": split_name,
                 "mae": float(met["mae_mean"]),
                 "ssim": float(met["ssim_mean"]),
                 "psnr": float(met["psnr_mean"]),
                 "pred_mean": pred_mean,
                 "target_mean": target_mean,
             }
-            with open(os.path.join(OUT_DIR, "Patch_3D_%s.json" % sid), "w") as f:
+            with open(os.path.join(out_dir, "Patch_3D_%s.json" % sid), "w") as f:
                 json.dump(out, f, indent=0)
             n += 1
-    print("Wrote", n, "per-subject JSONs for Patch_3D to", OUT_DIR)
+    print("Wrote", n, "per-subject JSONs for Patch_3D to", out_dir)
 
 if __name__ == "__main__":
     main()

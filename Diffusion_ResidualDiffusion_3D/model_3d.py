@@ -12,10 +12,18 @@ Key Differences from 2D:
 
 """
 
+import os
 import os, sys, glob, json, random, time
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 import torch
 import torch.nn as nn
@@ -300,8 +308,8 @@ def evaluate_model(model, loader, n_timesteps, betas, alphas, alphas_bar_sqrt, o
                 post_i = post_np[i, 0]
                 if pad_3d is not None:
                     import sys
-                    if "/data1/julih/scripts" not in sys.path:
-                        sys.path.insert(0, "/data1/julih/scripts")
+                    if os.path.join(_REPO_ROOT, "scripts") not in sys.path:
+                        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
                     from week7_preprocess import metrics_in_brain
                     m = metrics_in_brain(pred_i, post_i, data_range=1.0)
                     mae_list.append(m["mae_mean"])
@@ -370,7 +378,7 @@ def main():
     ckpt_name = 'residual_diffusion_3d_best.pt'
     results_name = 'residual_diffusion_3d_results.json'
     if use_week7:
-        sys.path.insert(0, '/data1/julih/scripts')
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
         from week7_data import get_week7_splits, Week7VolumePairs3D
         from week7_preprocess import TARGET_SHAPE
         train_pairs, val_pairs, test_pairs = get_week7_splits()
@@ -384,7 +392,7 @@ def main():
         val_dataset = Week7VolumePairs3D(val_pairs, augment=False, target_shape=TARGET_SHAPE)
         test_dataset = Week7VolumePairs3D(test_pairs, augment=False, target_shape=TARGET_SHAPE)
     else:
-        data_dir = "/data1/julih"
+        data_dir = _REPO_ROOT
         all_pre = sorted(glob.glob(f"{data_dir}/pre/pre_*.nii.gz"))
         all_pre_paired = [p for p in all_pre if os.path.exists(pre_to_post_path(p))]
         print(f"  Found {len(all_pre_paired)} paired volumes")

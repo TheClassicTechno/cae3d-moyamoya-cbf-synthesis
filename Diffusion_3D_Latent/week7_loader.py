@@ -7,7 +7,14 @@ Use get_week7_splits() and load_volume_week7() when training/eval with Week 7 pi
 import os
 import sys
 
-sys.path.insert(0, '/data1/julih/scripts')
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
 
 def get_week7_splits():
     """Return (train_pairs, val_pairs, test_pairs) from combined 2020-2023. Each pair is (pre_path, post_path)."""

@@ -3,7 +3,21 @@
 # Aggregates results and updates summary files.
 
 set -e
-ROOT="/data1/julih"
+_find_repo_root() {
+  local d
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  while [[ ! -f "$d/pyproject.toml" ]]; do
+    local parent
+    parent="$(dirname "$d")"
+    if [[ "$parent" == "$d" ]]; then
+      echo "Could not locate repository root (pyproject.toml not found)" >&2
+      exit 1
+    fi
+    d="$parent"
+  done
+  echo "$d"
+}
+ROOT="$(_find_repo_root)"
 cd "$ROOT"
 
 echo "=== Aggregating 3-seed results (week8_results) ==="
