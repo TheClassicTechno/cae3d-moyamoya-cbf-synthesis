@@ -10,6 +10,7 @@ subjects are kept and new data (e.g. 2024) is added only to train/val. Enables a
 comparison when measuring the effect of additional training data.
 """
 import os
+import sys
 import json
 import random
 import argparse
@@ -191,6 +192,13 @@ def main():
     with open(args.out, "w") as f:
         json.dump(out, f, indent=2)
     print("Combined: %d subjects, %d train / %d val / %d test. Written %s" % (n, len(train_pairs), len(val_pairs), len(test_pairs), args.out))
+    if n == 0:
+        print(
+            "WARNING: 0 subjects found -- this split file is empty and unusable. "
+            "Check that the raw data directories (pre/post, moyamoya_2020_nifti, moyamoya_2024_nifti) "
+            "exist under the repository root; this script does not raise an error on missing data.",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

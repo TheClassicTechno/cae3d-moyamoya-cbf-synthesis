@@ -93,6 +93,16 @@ def main():
 
     new_section = "\n".join(table_lines)
 
+    if not os.path.isfile(TABLE_PATH):
+        print(
+            "ERROR: %s not found. This script splices a computed table into an "
+            "existing document between the '## Results table (Week 7 pipeline)' "
+            "and '## How to run remaining models with same config' headers -- it "
+            "does not generate that document from scratch. Create WEEK7_TABLE_RESULTS.md "
+            "with those two section headers first, or point TABLE_PATH elsewhere." % TABLE_PATH
+        )
+        return
+
     with open(TABLE_PATH) as f:
         content = f.read()
 
