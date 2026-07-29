@@ -44,6 +44,7 @@ foundation = [
 ]
 dev = [
     "pytest",
+    "pyyaml",
 ]
 
 [tool.setuptools.packages.find]
