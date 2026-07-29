@@ -19,14 +19,21 @@ miniconda3/
 conda_envs/
 .env
 
-# Model checkpoints and weights (large)
+# Model checkpoints and weights (large), including suffixed backups
+# (e.g. foo.pt.backup_20260330 -- a plain "*.pt" rule doesn't match these)
 *.pt
+*.pt.*
 *.pth
+*.pth.*
 *.ckpt
+*.ckpt.*
 *.safetensors
 *.bin
 *.onnx
 pretrained/
+
+# Unrelated local work that has nothing to do with this repository
+music_hw/
 
 # Training / run outputs
 runs_*/
