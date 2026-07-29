@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the paper below."
+title: "Synthesize Post-Acetazolamide Cerebral Blood Flow Maps from Baseline ASL MRI in Moyamoya Using a 3D Conditional Autoencoder"
+type: software
+authors:
+  - family-names: Huang
+    given-names: Juli
+    # TODO: add ORCID and any co-authors before public release
+preferred-citation:
+  type: conference-paper
+  title: "Synthesize Post-Acetazolamide Cerebral Blood Flow Maps from Baseline ASL MRI in Moyamoya Using a 3D Conditional Autoencoder"
+  authors:
+    - family-names: Huang
+      given-names: Juli
+      # TODO: add co-authors in author order as they will appear on the paper
+  conference:
+    name: "Machine Learning for Healthcare (MLHC) 2026"
+  year: 2026
+  # TODO: fill in venue URL / DOI / proceedings pages once assigned
