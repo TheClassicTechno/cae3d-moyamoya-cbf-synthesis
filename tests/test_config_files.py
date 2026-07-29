@@ -2,6 +2,8 @@
 import os
 import tomllib
 
+import pytest
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -13,7 +15,7 @@ def test_pyproject_toml_valid():
 
 
 def test_citation_cff_valid():
-    yaml = __import__("yaml")
+    yaml = pytest.importorskip("yaml", reason="pyyaml is a dev-only test dependency (pip install -e '.[dev]')")
     with open(os.path.join(REPO_ROOT, "CITATION.cff")) as f:
         data = yaml.safe_load(f)
     for required in ("cff-version", "message", "title", "authors"):

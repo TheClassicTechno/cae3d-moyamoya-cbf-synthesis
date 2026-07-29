@@ -21,6 +21,8 @@ def _files_with_repo_root_snippet():
         ["git", "ls-files", "*.py"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
     ).stdout.splitlines()
     for rel_path in tracked:
+        if rel_path.startswith("tests/"):
+            continue  # this file's own source text matches the substring search below
         path = os.path.join(REPO_ROOT, rel_path)
         with open(path, encoding="utf-8") as f:
             text = f.read()
