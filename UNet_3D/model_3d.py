@@ -23,6 +23,13 @@ import random
 import time
 from typing import List, Tuple, Optional
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
@@ -273,7 +280,7 @@ def evaluate(
     model.eval()
     if use_week7_brain_only:
         import sys
-        sys.path.insert(0, "/data1/julih/scripts")
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
         from week7_preprocess import metrics_in_brain
 
     mae_list = []
@@ -350,9 +357,12 @@ def main():
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
         'seed': int(os.environ.get('SEED', 42)),
         'use_2020': False,
-        'split_2020_json': '/data1/julih/2020_single_delay_split.json',
-        'combined_split_json': '/data1/julih/combined_subject_split.json',
-        'use_week7': os.environ.get('WEEK7', '').lower() in ('1', 'true', 'yes'),  # Same data/preprocess as Week7: 91x109x91, brain mask
+        'split_2020_json': '<repo-root>/2020_single_delay_split.json',
+        'combined_split_json': '<repo-root>/combined_subject_split.json',
+        'use_week7': (
+            '--week7' in sys.argv
+            or is_env_flag('WEEK7')
+        ),
     }
     
     print(f"\nConfiguration:")
@@ -366,31 +376,28 @@ def main():
     
     # Load data
     print(f"\n📂 Loading data...")
+    # Per-fold K-fold: force Week7 pipeline so get_week7_splits() uses WEEK7_SPLIT_PATH (not combined JSON only).
+    _kf_split = os.environ.get("WEEK7_SPLIT_PATH", "").strip()
+    if _kf_split and os.path.isfile(_kf_split):
+        CONFIG['use_week7'] = True
+
     split_json = None
     use_pairs = False
     ckpt_name = 'unet_3d_best.pt'
     results_name = 'unet_3d_results.json'
-    if CONFIG.get('combined_split_json') and os.path.isfile(CONFIG['combined_split_json']):
-        split_json = CONFIG['combined_split_json']
-        use_pairs = True
-        ckpt_name = 'unet_3d_combined_best.pt'
-        results_name = 'unet_3d_results_combined.json'
-    elif CONFIG.get('use_2020') and os.path.isfile(CONFIG.get('split_2020_json', '')):
-        split_json = CONFIG['split_2020_json']
-        use_pairs = True
-        ckpt_name = 'unet_3d_2020_best.pt'
-        results_name = 'unet_3d_results_2020.json'
     use_phase2_3d = False
     static_region_mask_t = None
+
     if CONFIG.get('use_week7'):
-        # Week7 standard: 91x109x91, brain mask, combined 2020-2023, same augmentations
-        sys.path.insert(0, '/data1/julih/scripts')
+        # Week7 standard: 91x109x91, brain mask; split from get_combined_split_path() (K-fold or combined)
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
         from week7_data import get_week7_splits, Week7VolumePairs3D, Week7VolumePairs3DWithMasks
-        from week7_preprocess import TARGET_SHAPE, get_region_weight_mask_for_shape
+        from week7_preprocess import TARGET_SHAPE, get_region_weight_mask_for_shape, get_combined_split_path, week7_kfold_suffix_paths, is_env_flag
+        print(f"  Split JSON: {get_combined_split_path()}")
         train_pairs, val_pairs, test_pairs = get_week7_splits()
         CONFIG['target_size'] = (96, 112, 96)  # pad for UNet divisibility
-        use_region_weight = os.environ.get('WEEK7_REGION_WEIGHT', '').lower() in ('1', 'true', 'yes')
-        use_subject_masks = os.environ.get('WEEK7_SUBJECT_MASKS', '').lower() in ('1', 'true', 'yes')
+        use_region_weight = is_env_flag('WEEK7_REGION_WEIGHT')
+        use_subject_masks = is_env_flag('WEEK7_SUBJECT_MASKS')
         use_phase2_3d = use_region_weight or use_subject_masks
         print(f"  Week7: 91x109x91 + brain mask, combined 2020-2023: {len(train_pairs)} train / {len(val_pairs)} val / {len(test_pairs)} test")
         if use_subject_masks:
@@ -408,7 +415,25 @@ def main():
             static_region_mask_t = torch.from_numpy(mask_np).float().to(CONFIG['device']).unsqueeze(0).unsqueeze(0)
         ckpt_name = 'unet_3d_week7_best.pt'
         results_name = 'unet_3d_results_week7_phase2.json' if use_phase2_3d else 'unet_3d_results_week7.json'
-    elif use_pairs and split_json:
+        ckpt_name, results_name = week7_kfold_suffix_paths(ckpt_name, results_name)
+    elif CONFIG.get('combined_split_json') and os.path.isfile(CONFIG['combined_split_json']):
+        split_json = CONFIG['combined_split_json']
+        ckpt_name = 'unet_3d_combined_best.pt'
+        results_name = 'unet_3d_results_combined.json'
+        with open(split_json) as f:
+            data = json.load(f)
+        train_pairs = [(x['pre_path'], x['post_path']) for x in data['train']]
+        val_pairs = [(x['pre_path'], x['post_path']) for x in data['val']]
+        test_pairs = [(x['pre_path'], x['post_path']) for x in data['test']]
+        print(f"  From {split_json}: {len(train_pairs)} train / {len(val_pairs)} val / {len(test_pairs)} test")
+        print(f"\n📊 Creating datasets...")
+        train_dataset = PairsFromPaths(train_pairs, CONFIG['target_size'])
+        val_dataset = PairsFromPaths(val_pairs, CONFIG['target_size'])
+        test_dataset = PairsFromPaths(test_pairs, CONFIG['target_size'])
+    elif CONFIG.get('use_2020') and os.path.isfile(CONFIG.get('split_2020_json', '')):
+        split_json = CONFIG['split_2020_json']
+        ckpt_name = 'unet_3d_2020_best.pt'
+        results_name = 'unet_3d_results_2020.json'
         with open(split_json) as f:
             data = json.load(f)
         train_pairs = [(x['pre_path'], x['post_path']) for x in data['train']]
@@ -420,7 +445,7 @@ def main():
         val_dataset = PairsFromPaths(val_pairs, CONFIG['target_size'])
         test_dataset = PairsFromPaths(test_pairs, CONFIG['target_size'])
     else:
-        data_dir = "/data1/julih"
+        data_dir = _REPO_ROOT
         all_pre = sorted(glob.glob(f"{data_dir}/pre/pre_*.nii.gz"))
         print(f"  Found {len(all_pre)} pre-scans")
         all_pre_paired = [p for p in all_pre if os.path.exists(pre_to_post_path(p))]

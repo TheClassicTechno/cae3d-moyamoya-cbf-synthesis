@@ -6,8 +6,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 TARGET_SIZE = (128, 128, 64)
-DATA_DIR = "/data1/julih"
+DATA_DIR = _REPO_ROOT
 
 
 def load_volume(path, target_size=TARGET_SIZE):
@@ -119,7 +126,7 @@ class Week7VolumePairsFNO(torch.utils.data.Dataset):
 
     def __getitem__(self, i):
         import sys
-        sys.path.insert(0, "/data1/julih/scripts")
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
         from week7_preprocess import load_volume as w7_load
         from week7_preprocess import TARGET_SHAPE
         pre_path, post_path = self.pairs[i]

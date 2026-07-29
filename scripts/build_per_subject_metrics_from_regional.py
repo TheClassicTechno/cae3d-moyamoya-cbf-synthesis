@@ -11,7 +11,7 @@ import json
 import os
 from pathlib import Path
 
-ROOT = Path("/data1/julih")
+ROOT = Path("<repo-root>")
 REGIONAL_FILES = [
     ("week8_regional_unet3d.json", "week7_unet3d"),
     ("week8_regional_resnet3d.json", "week7_resnet3d"),

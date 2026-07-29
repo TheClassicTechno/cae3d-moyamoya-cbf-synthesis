@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Render vascular/territory masks from /data1/julih/Masks as PNG slices.
+Render vascular/territory masks from <repo-root>/Masks as PNG slices.
 Output: Masks/region_mask_pngs/ with one PNG per mask (axial mid-slices) and a composite.
 """
 import os
@@ -9,13 +9,20 @@ import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 # Allow import of week7_preprocess when run from repo root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 TARGET_SHAPE = (91, 109, 91)
-BRAIN_MASK_PATH = "/data1/julih/MNI152_T1_2mm_brain_mask_dil.nii.gz"
-MASKS_DIR = "/data1/julih/Masks"
-OUT_DIR = "/data1/julih/Masks/region_mask_pngs"
+BRAIN_MASK_PATH = os.path.join(_REPO_ROOT, "MNI152_T1_2mm_brain_mask_dil.nii.gz")
+MASKS_DIR = os.path.join(_REPO_ROOT, "Masks")
+OUT_DIR = os.path.join(_REPO_ROOT, "Masks/region_mask_pngs")
 
 
 def load_vol(path, target_shape):

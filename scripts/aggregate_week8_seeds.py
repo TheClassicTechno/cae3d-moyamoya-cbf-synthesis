@@ -8,7 +8,7 @@ Expects: per-seed result JSONs with keys mae_mean, ssim_mean, psnr_mean.
 
 Usage:
   python scripts/aggregate_week8_seeds.py --results_dir /path/to/results --output table_week8.md
-  python scripts/aggregate_week8_seeds.py --results_dir /data1/julih --pattern "*_seed*.json" --output week8_aggregate.csv
+  python scripts/aggregate_week8_seeds.py --results_dir <repo-root> --pattern "*_seed*.json" --output week8_aggregate.csv
 
 Output: Table (Markdown or CSV) with columns Model, MAE (mean+/-std), SSIM (mean+/-std), PSNR (mean+/-std).
 """
@@ -18,6 +18,13 @@ import json
 import os
 import re
 from pathlib import Path
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 
 def find_seed_jsons(results_dir: str, pattern: str = "*_seed*.json"):
@@ -96,7 +103,7 @@ def ci_half(std: float, n: int, z: float = 1.96) -> float:
 
 def main():
     ap = argparse.ArgumentParser(description="Aggregate Week 8 seed results to mean +/- std")
-    ap.add_argument("--results_dir", default="/data1/julih", help="Root dir to search for *_seed*.json")
+    ap.add_argument("--results_dir", default=_REPO_ROOT, help="Root dir to search for *_seed*.json")
     ap.add_argument("--pattern", default="*_seed*.json", help="Glob for result files")
     ap.add_argument("--output", default="", help="Output path (e.g. week8_table.md or .csv)")
     ap.add_argument("--seeds", type=str, default="42,123,456", help="Comma-separated seeds to expect (for validation)")

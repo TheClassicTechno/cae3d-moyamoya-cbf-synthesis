@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
 Week 7 unified preprocessing for fair 2D vs 3D comparison.
+- Optional affine registration to MNI152 2mm (12-DOF, FSL FLIRT): set WEEK7_AFFINE=1.
+  When enabled, pre-ACZ is registered to the reference; the same transform is applied to
+  post-ACZ so the pair remains aligned. Registered volumes are cached under AFFINE_CACHE_DIR.
 - Apply MNI brain mask to all volumes (outside mask = 0).
 - Same dimensions: 91 x 109 x 91 (match MNI152_T1_2mm_brain_mask_dil).
 - Pad with 0s when needed; resize to target; min-max norm.
@@ -8,18 +11,168 @@ Week 7 unified preprocessing for fair 2D vs 3D comparison.
 Use with combined 2020-2023 split so train/val/test are identical across all models.
 """
 import os
+import re
 import json
+import hashlib
+import subprocess
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
 from typing import Tuple, Optional, List
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 # Same for everyone (from week7tasks.txt)
 TARGET_SHAPE = (91, 109, 91)  # MNI 2mm brain mask dimensions
-BRAIN_MASK_PATH = "/data1/julih/MNI152_T1_2mm_brain_mask_dil.nii.gz"
-COMBINED_SPLIT_PATH = "/data1/julih/combined_subject_split.json"
+BRAIN_MASK_PATH = os.path.join(_REPO_ROOT, "MNI152_T1_2mm_brain_mask_dil.nii.gz")
+COMBINED_SPLIT_PATH = os.path.join(_REPO_ROOT, "combined_subject_split.json")
+
+# Affine registration (Path A): reference = MNI 2mm T1 brain or mask; cache under this dir
+_MNI_DIR = os.path.dirname(BRAIN_MASK_PATH)
+MNI_REFERENCE_PATH = os.environ.get(
+    "WEEK7_MNI_REFERENCE",
+    os.path.join(_MNI_DIR, "MNI152_T1_2mm_brain.nii.gz"),
+)
+if not os.path.isfile(MNI_REFERENCE_PATH):
+    MNI_REFERENCE_PATH = BRAIN_MASK_PATH  # fallback: use mask as reference (same grid)
+AFFINE_CACHE_DIR = os.environ.get("WEEK7_AFFINE_CACHE", os.path.join(_MNI_DIR, "week7_affine_cache"))
+USE_AFFINE = os.environ.get("WEEK7_AFFINE", "0").lower() in ("1", "true", "yes")
 
 _mask_cache = None
+_flirt_warned = False
+
+
+def _flirt_available() -> bool:
+    """True if FSL flirt and applyxfm are on PATH."""
+    import shutil
+    return bool(shutil.which("flirt") and shutil.which("applyxfm"))
+
+
+def _affine_cache_key(pre_path: str, post_path: str) -> str:
+    """Stable key for caching registered pair (pre and post paths + ref mtime)."""
+    ref_mtime = str(os.path.getmtime(MNI_REFERENCE_PATH)) if os.path.isfile(MNI_REFERENCE_PATH) else "0"
+    raw = f"{os.path.abspath(pre_path)}|{os.path.abspath(post_path)}|{ref_mtime}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+def _register_pair_to_mni_dipy(
+    pre_path: str,
+    post_path: str,
+    ref_path: str,
+    pre_out: str,
+    post_out: str,
+) -> None:
+    """
+    12-DOF affine registration using DIPY (fallback when FSL not available).
+    Registers pre to reference, applies same transform to post; writes pre_out, post_out.
+    """
+    try:
+        from dipy.align import affine_registration
+    except ImportError:
+        raise RuntimeError("WEEK7_AFFINE=1 and FSL not available. Install dipy: pip install dipy")
+    ref_img = nib.load(ref_path)
+    ref_data = np.asarray(ref_img.dataobj).squeeze().astype(np.float64)
+    ref_affine = ref_img.affine.copy()
+    pre_img = nib.load(pre_path)
+    pre_data = np.asarray(pre_img.dataobj).squeeze().astype(np.float64)
+    if pre_data.ndim == 4:
+        pre_data = pre_data[..., 0]
+    post_img = nib.load(post_path)
+    post_data = np.asarray(post_img.dataobj).squeeze().astype(np.float64)
+    if post_data.ndim == 4:
+        post_data = post_data[..., 0]
+    pipeline = ["center_of_mass", "translation", "rigid", "affine"]
+    pre_reg_data, reg_affine = affine_registration(
+        pre_data, ref_data,
+        moving_affine=pre_img.affine,
+        static_affine=ref_affine,
+        pipeline=pipeline,
+        nbins=32,
+        level_iters=[100, 50, 20],
+        sigmas=[3.0, 1.0, 0.0],
+    )
+    from scipy.ndimage import affine_transform
+    T = np.linalg.inv(post_img.affine) @ np.linalg.inv(reg_affine) @ ref_affine
+    post_reg_data = affine_transform(
+        post_data.astype(np.float64), T[:3, :3], offset=T[:3, 3],
+        output_shape=ref_data.shape, order=1, cval=0.0,
+    ).astype(np.float32)
+    nib.save(nib.Nifti1Image(np.asarray(pre_reg_data, dtype=np.float32), ref_affine), pre_out)
+    nib.save(nib.Nifti1Image(post_reg_data, ref_affine), post_out)
+
+
+def register_pair_to_mni(
+    pre_path: str,
+    post_path: str,
+    ref_path: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+    dof: int = 12,
+) -> Tuple[str, str]:
+    """
+    Register pre-ACZ to MNI (12-DOF affine), apply same transform to post-ACZ.
+    Returns (path_to_registered_pre, path_to_registered_post). Uses cache when present.
+    Uses FSL FLIRT when available; otherwise DIPY (pip install dipy).
+    """
+    ref_path = ref_path or MNI_REFERENCE_PATH
+    cache_dir = cache_dir or AFFINE_CACHE_DIR
+    os.makedirs(cache_dir, exist_ok=True)
+    key = _affine_cache_key(pre_path, post_path)
+    pre_out = os.path.join(cache_dir, f"pre_{key}.nii.gz")
+    post_out = os.path.join(cache_dir, f"post_{key}.nii.gz")
+    mat_path = os.path.join(cache_dir, f"{key}.mat")
+    if os.path.isfile(pre_out) and os.path.isfile(post_out):
+        return pre_out, post_out
+    if _flirt_available():
+        # FSL FLIRT path
+        subprocess.run(
+            ["flirt", "-in", pre_path, "-ref", ref_path, "-out", pre_out, "-omat", mat_path, "-dof", str(dof), "-interp", "trilinear"],
+            check=True, capture_output=True, timeout=300,
+        )
+        subprocess.run(
+            ["applyxfm", "-in", post_path, "-ref", ref_path, "-out", post_out, "-init", mat_path, "-interp", "trilinear"],
+            check=True, capture_output=True, timeout=120,
+        )
+    else:
+        # DIPY fallback (12-DOF affine)
+        _register_pair_to_mni_dipy(pre_path, post_path, ref_path, pre_out, post_out)
+    return pre_out, post_out
+
+
+def load_pre_post_pair(
+    pre_path: str,
+    post_path: str,
+    use_affine: Optional[bool] = None,
+    target_shape: Tuple[int, int, int] = TARGET_SHAPE,
+    apply_mask: bool = True,
+    minmax: bool = True,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Load (pre_vol, post_vol) as float32 arrays of shape target_shape.
+    When use_affine is True (or WEEK7_AFFINE=1), volumes are affinely registered to MNI
+    first (same transform applied to both); then mask and min-max are applied.
+    When use_affine is False, loads with resampling only (no registration).
+    """
+    global _flirt_warned
+    do_affine = use_affine if use_affine is not None else USE_AFFINE
+    if do_affine:
+        try:
+            pre_reg, post_reg = register_pair_to_mni(pre_path, post_path)
+            pre_vol = load_volume(pre_reg, target_shape=target_shape, apply_mask=apply_mask, minmax=minmax)
+            post_vol = load_volume(post_reg, target_shape=target_shape, apply_mask=apply_mask, minmax=minmax)
+            return pre_vol, post_vol
+        except Exception as e:
+            if not _flirt_warned:
+                _flirt_warned = True
+                import warnings
+                warnings.warn(f"WEEK7_AFFINE=1 but registration failed ({e}); loading without affine.", UserWarning)
+    pre_vol = load_volume(pre_path, target_shape=target_shape, apply_mask=apply_mask, minmax=minmax)
+    post_vol = load_volume(post_path, target_shape=target_shape, apply_mask=apply_mask, minmax=minmax)
+    return pre_vol, post_vol
 
 
 def get_brain_mask() -> np.ndarray:
@@ -152,9 +305,77 @@ def augment_volume(
     return out
 
 
+def is_env_flag(var: str) -> bool:
+    """Return True if env var is set to a truthy string (1/true/yes, case-insensitive)."""
+    return os.environ.get(var, "").lower() in ("1", "true", "yes")
+
+
+def is_week7_kfold() -> bool:
+    """Return True when a per-fold split path is active (K-fold mode)."""
+    return bool(os.environ.get("WEEK7_SPLIT_PATH", "").strip())
+
+
+def get_kfold_seed(base: int = None) -> int:
+    """Return effective training seed: base + fold_index when in K-fold mode, else base.
+
+    Reads SEED env (default 42) for base; reads WEEK11_KFOLD_FOLD for fold offset.
+    Centralizes the conditional arithmetic scattered across model training scripts.
+    """
+    base = base if base is not None else int(os.environ.get("SEED", 42))
+    if not is_week7_kfold():
+        return base
+    fold_env = os.environ.get("WEEK11_KFOLD_FOLD", "").strip()
+    fold_idx = int(fold_env) if fold_env.isdigit() else 0
+    return base + fold_idx
+
+
+def get_combined_split_path() -> str:
+    """Path to combined split JSON. Use WEEK7_SPLIT_PATH env for K-fold per-fold splits."""
+    return os.environ.get("WEEK7_SPLIT_PATH", "").strip() or COMBINED_SPLIT_PATH
+
+
+def week7_kfold_results_tag() -> str:
+    """Return e.g. ``_fold2`` for unique K-fold checkpoints and result JSONs.
+
+    Prefer ``WEEK11_KFOLD_FOLD`` (set by ``run_week11_kfold*.sh``). Otherwise parse
+    ``split_foldN.json`` from ``WEEK7_SPLIT_PATH``. Empty if not in K-fold.
+    """
+    fold = os.environ.get("WEEK11_KFOLD_FOLD", "").strip()
+    if fold.isdigit():
+        return "_fold%s" % fold
+    path = os.environ.get("WEEK7_SPLIT_PATH", "")
+    m = re.search(r"split_fold(\d+)\.json", path, re.I)
+    if m:
+        return "_fold%s" % m.group(1)
+    return ""
+
+
+def week7_kfold_suffix_paths(ckpt_name: str, results_name: str):
+    """Append K-fold tag before ``.pt`` / ``.json`` so folds do not clobber each other."""
+    tag = week7_kfold_results_tag()
+    if not tag:
+        return ckpt_name, results_name
+    if ckpt_name.endswith(".pt"):
+        ckpt_name = ckpt_name[:-3] + tag + ".pt"
+    if results_name.endswith(".json"):
+        results_name = results_name[:-5] + tag + ".json"
+    return ckpt_name, results_name
+
+
+def week7_kfold_suffix_checkpoint(ckpt_name: str) -> str:
+    """Append K-fold tag to a ``.pt`` path (EMA/VAE/aux checkpoints)."""
+    tag = week7_kfold_results_tag()
+    if not tag or not ckpt_name.endswith(".pt"):
+        return ckpt_name
+    return ckpt_name[:-3] + tag + ".pt"
+
+
 def load_combined_split() -> dict:
-    """Load combined 2020-2023 subject-level split."""
-    with open(COMBINED_SPLIT_PATH) as f:
+    """Load combined 2020-2024 subject-level split (from combined_subject_split.json or WEEK7_SPLIT_PATH)."""
+    path = get_combined_split_path()
+    if not path or not os.path.isfile(path):
+        path = COMBINED_SPLIT_PATH
+    with open(path) as f:
         return json.load(f)
 
 
@@ -168,6 +389,61 @@ def get_pre_post_pairs(split_key: str = "train") -> List[Tuple[str, str]]:
         if pre and post and os.path.isfile(pre) and os.path.isfile(post):
             pairs.append((pre, post))
     return pairs
+
+
+def _subject_id_from_path(pre_path: str) -> str:
+    """Derive subject id from pre path (e.g. pre_2021_001.nii.gz -> 2021_001).
+
+    Stanford 2020 cohort uses the same CBF filename under different subject folders
+    (e.g. .../moyamoya_stanford_2020_007/...); basename-only ids collide. Also used
+    as fallback when split JSON has no subject_id.
+    """
+    m = re.search(r"moyamoya_stanford_(\d{4}_\d+)", pre_path)
+    if m:
+        return m.group(1)
+    base = os.path.basename(pre_path).replace(".nii.gz", "").replace(".nii", "")
+    if base.startswith("pre_"):
+        return base.replace("pre_", "", 1)
+    m2 = re.match(r"(.+)_pre$", base)
+    if m2:
+        return m2.group(1)
+    return base.replace("pre", "").strip("_") or "unknown"
+
+
+def get_week7_splits():
+    """Return train, val, test pairs (pre_path, post_path) from combined 2020–2023 split."""
+    return (
+        get_pre_post_pairs("train"),
+        get_pre_post_pairs("val"),
+        get_pre_post_pairs("test"),
+    )
+
+
+def get_pre_post_pairs_with_subject_id(split_key: str = "train") -> List[Tuple[str, str, str]]:
+    """Return list of (subject_id, pre_path, post_path) for split_key. Uses canonical subject_id from split when present (ensures n=32 unique IDs for test)."""
+    data = load_combined_split()
+    out = []
+    for item in data.get(split_key, []):
+        pre = item.get("pre_path")
+        post = item.get("post_path")
+        if not pre or not post or not os.path.isfile(pre) or not os.path.isfile(post):
+            continue
+        sid = item.get("subject_id") or _subject_id_from_path(pre)
+        out.append((sid, pre, post))
+    return out
+
+
+def collect_pre_post_quads_by_splits(split_keys: List[str]) -> List[Tuple[str, str, str, str]]:
+    """Concatenate several splits: each row is (subject_id, pre_path, post_path, split_key).
+
+    Typical use: ``split_keys=["train","val","test"]`` → all subjects in combined_subject_split
+    with valid paths (e.g. 252 rows when 193+27+32).
+    """
+    out: List[Tuple[str, str, str, str]] = []
+    for sk in split_keys:
+        for sid, pre, post in get_pre_post_pairs_with_subject_id(sk):
+            out.append((sid, pre, post, sk))
+    return out
 
 
 def get_subject_center_map(split_path: Optional[str] = None) -> dict:
@@ -337,16 +613,16 @@ def get_brain_mask_for_shape(shape: Tuple[int, ...], dtype=np.float32) -> np.nda
 # ---------------------------------------------------------------------------
 # Phase 2: Vascular / MNI territory region-weighted loss
 # ---------------------------------------------------------------------------
-MASKS_DIR_DEFAULT = "/data1/julih/Masks"
-MASKS_DIR_RYDHAM = "/data/rydham/Masks"
+MASKS_DIR_DEFAULT = os.path.join(_REPO_ROOT, "Masks")
+MASKS_DIR_EXTRA = os.environ.get("MOYAMOYA_MASKS_DIR", "")
 
 
 def _get_masks_dir() -> Optional[str]:
-    """Return first existing of MASKS_DIR_DEFAULT, MASKS_DIR_RYDHAM, or None."""
+    """Return first existing of MASKS_DIR_DEFAULT, MASKS_DIR_EXTRA (env override), or None."""
     if os.path.isdir(MASKS_DIR_DEFAULT):
         return MASKS_DIR_DEFAULT
-    if os.path.isdir(MASKS_DIR_RYDHAM):
-        return MASKS_DIR_RYDHAM
+    if MASKS_DIR_EXTRA and os.path.isdir(MASKS_DIR_EXTRA):
+        return MASKS_DIR_EXTRA
     return None
 
 

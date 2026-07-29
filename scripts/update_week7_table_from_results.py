@@ -4,7 +4,14 @@ import os
 import json
 import re
 
-ROOT = "/data1/julih"
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+ROOT = _REPO_ROOT
 TABLE_PATH = os.path.join(ROOT, "WEEK7_TABLE_RESULTS.md")
 
 

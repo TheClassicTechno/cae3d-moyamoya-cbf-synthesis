@@ -4,7 +4,14 @@ Run after combined training finishes. Does not start or stop any training."""
 import json
 import os
 
-BASE = "/data1/julih"
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+BASE = _REPO_ROOT
 FILES = [
     ("3D DDPM (combined)", f"{BASE}/Diffusion_baseline_3D/ddpm_3d_combined_results.json"),
     ("UNet 3D (combined)", f"{BASE}/UNet_3D/unet_3d_results_combined.json"),

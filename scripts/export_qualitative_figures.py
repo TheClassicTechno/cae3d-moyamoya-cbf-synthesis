@@ -2,7 +2,7 @@
 """
 Export four PNGs for the paper figure: pre-ACZ, post-ACZ (target), predicted, brain mask (middle axial slice).
 Usage:
-  cd /data1/julih && python scripts/export_qualitative_figures.py [--checkpoint PATH] [--out figures]
+  cd <repo-root> && python scripts/export_qualitative_figures.py [--checkpoint PATH] [--out figures]
 Without --checkpoint, predicted slice is set to post (placeholder); with checkpoint, run one forward pass.
 """
 import os
@@ -10,10 +10,17 @@ import sys
 import argparse
 import numpy as np
 
-sys.path.insert(0, "/data1/julih/scripts")
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
 from week7_preprocess import load_volume, TARGET_SHAPE, get_brain_mask, get_pre_post_pairs
 
-OUT_DIR = "/data1/julih/figures"
+OUT_DIR = os.path.join(_REPO_ROOT, "figures")
 
 
 def main():
@@ -58,7 +65,7 @@ def main():
 
     if args.checkpoint and os.path.isfile(args.checkpoint):
         # Optional: load model and run inference (UNet 3D / script style)
-        sys.path.insert(0, "/data1/julih/scripts")
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
         import torch
         from torch.utils.data import DataLoader
         test_ds = Week7VolumePairs3D([(pre_path, post_path)], augment=False, target_shape=TARGET_SHAPE)

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path("/data1/julih")
+ROOT = Path("<repo-root>")
 sys.path.insert(0, str(ROOT / "scripts"))
 from week7_data import get_week7_splits, _subject_id_from_path
 from week7_preprocess import TARGET_SHAPE, load_volume, load_territory_masks
@@ -138,6 +138,9 @@ def main():
                 mean_pre = mean_pre_by_territory.get(ter_name)
                 if mean_pre is None:
                     continue
+                # Absolute change (normalized units): avoids denominator instability
+                delta_gt_abs = float(mean_gt) - mean_pre if mean_gt is not None else float("nan")
+                delta_pred_abs = float(mean_pred) - mean_pre if mean_pred is not None else float("nan")
                 if mean_pre < MIN_MEAN_PRE_FOR_PCT:
                     delta_gt_pct = float("nan")
                     delta_pred_pct = float("nan")
@@ -153,12 +156,14 @@ def main():
                     "mean_post_pred": round(float(mean_pred), 6) if mean_pred is not None else "",
                     "delta_cbf_gt_pct": round(delta_gt_pct, 4) if not np.isnan(delta_gt_pct) else "",
                     "delta_cbf_pred_pct": round(delta_pred_pct, 4) if not np.isnan(delta_pred_pct) else "",
+                    "delta_cbf_gt_abs": round(delta_gt_abs, 6) if not np.isnan(delta_gt_abs) else "",
+                    "delta_cbf_pred_abs": round(delta_pred_abs, 6) if not np.isnan(delta_pred_abs) else "",
                 })
 
     csv_path = out_dir / "delta_cbf_by_territory.csv"
     if all_rows:
         with open(csv_path, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=["model", "subject_id", "territory", "mean_pre", "mean_post_gt", "mean_post_pred", "delta_cbf_gt_pct", "delta_cbf_pred_pct"])
+            w = csv.DictWriter(f, fieldnames=["model", "subject_id", "territory", "mean_pre", "mean_post_gt", "mean_post_pred", "delta_cbf_gt_pct", "delta_cbf_pred_pct", "delta_cbf_gt_abs", "delta_cbf_pred_abs"])
             w.writeheader()
             w.writerows(all_rows)
         print("Wrote", csv_path, "with", len(all_rows), "rows")
@@ -173,16 +178,20 @@ def main():
         for model in models:
             lines.append("### " + model)
             lines.append("")
-            lines.append("| Territory | mean delta_cbf_gt (%) | mean delta_cbf_pred (%) | n |")
-            lines.append("|-----------|------------------------|--------------------------|---|")
+            lines.append("| Territory | GT delta% | pred delta% | GT delta_abs | pred delta_abs | n |")
+            lines.append("|-----------|-----------|-------------|--------------|----------------|---|")
             for ter in territories:
                 vals_gt = [r["delta_cbf_gt_pct"] for r in all_rows if r["model"] == model and r["territory"] == ter and r["delta_cbf_gt_pct"] != ""]
                 vals_pred = [r["delta_cbf_pred_pct"] for r in all_rows if r["model"] == model and r["territory"] == ter and r["delta_cbf_pred_pct"] != ""]
+                vals_gt_abs = [r["delta_cbf_gt_abs"] for r in all_rows if r["model"] == model and r["territory"] == ter and r.get("delta_cbf_gt_abs","") != ""]
+                vals_pred_abs = [r["delta_cbf_pred_abs"] for r in all_rows if r["model"] == model and r["territory"] == ter and r.get("delta_cbf_pred_abs","") != ""]
                 n = len(vals_gt)
                 if n:
                     m_gt = np.nanmean([float(x) for x in vals_gt]) if vals_gt else float("nan")
                     m_pred = np.nanmean([float(x) for x in vals_pred]) if vals_pred else float("nan")
-                    lines.append("| %s | %.2f | %.2f | %d |" % (ter, m_gt, m_pred, n))
+                    m_gt_abs = np.nanmean([float(x) for x in vals_gt_abs]) if vals_gt_abs else float("nan")
+                    m_pred_abs = np.nanmean([float(x) for x in vals_pred_abs]) if vals_pred_abs else float("nan")
+                    lines.append("| %s | %.2f | %.2f | %.4f | %.4f | %d |" % (ter, m_gt, m_pred, m_gt_abs, m_pred_abs, n))
             lines.append("")
         with open(summary_path, "w") as f:
             f.write("\n".join(lines))

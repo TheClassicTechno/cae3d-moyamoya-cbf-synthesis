@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 .venv/
+.venv_slide_ml/
 venv/
 env/
 *.egg-info/
@@ -18,14 +19,21 @@ miniconda3/
 conda_envs/
 .env
 
-# Model checkpoints and weights (large)
+# Model checkpoints and weights (large), including suffixed backups
+# (e.g. foo.pt.backup_20260330 -- a plain "*.pt" rule doesn't match these)
 *.pt
+*.pt.*
 *.pth
+*.pth.*
 *.ckpt
+*.ckpt.*
 *.safetensors
 *.bin
 *.onnx
 pretrained/
+
+# Unrelated local work that has nothing to do with this repository
+music_hw/
 
 # Training / run outputs
 runs_*/
@@ -61,6 +69,9 @@ week7_subject_masks/
 *.bak
 *~
 
+# Pytest
+.pytest_cache/
+
 # IDE
 .idea/
 .vscode/
@@ -91,3 +102,91 @@ week7_subject_masks/
 *.nii
 *.nii.gz
 # Remove the two lines above if you want to track small NIfTI configs
+
+# More image / figure / document formats (code repo should hold no diagrams or docs)
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.eps
+*.tif
+*.tiff
+*.bmp
+*.pdf
+*.csv
+*.zip
+*.tips
+
+# Paper / manuscript sources and LaTeX build artifacts (papers live elsewhere, not in the code repo)
+*.tex
+*.bib
+*.aux
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.out
+
+# Environment / editor / remote-dev caches
+.TinyTeX/
+.cursor-server/
+.vscode-server/
+.local/
+julih_venv/
+myenv/
+venv_affine/
+.sam_cbf_venv/
+.venv_2020/
+
+# Backups
+latestversion_backup_*/
+
+# Raw / patient imaging data and derived data dirs (never commit PHI-adjacent data)
+moyamoya_*_nifti/
+moyamoya_*_dicom/
+pre_scans
+post_scans
+
+# Regenerable results, figures, and evaluation-output directories
+# (results/* rather than results/ so we can keep results/README.md tracked)
+Results/
+results/*
+!results/README.md
+results_*/
+week*_stats/
+week*_kfold*/
+roi_summary_tables/
+demographics_figures/
+qualitative_review/
+subgroup_equity_experiments/
+visual_checks/
+VLMCSVFILES/
+**/Mask evaluations/
+**/differences/
+
+# Third-party cloned codebases (external deps, not our own code)
+third_party_foundation_3d/Med3DVLM/
+third_party_foundation_3d/SAM-Med3D/
+third_party_foundation_3d/STU-Net-*/
+third_party_foundation_3d/*_output/
+third_party_foundation_3d/*results/
+third_party_foundation_3d/med3dvlm_week7_cvr/
+
+# Misc vendor installers, one-off logs
+Miniconda3-latest-*.sh
+*_nohup.out
+nohup.out
+
+# Exceptions: keep the curated public code-release bundle's docs (overrides *.md / *.txt above)
+# NOTE: mlhc_code_release/ is a stale, superseded snapshot (see reorg notes) —
+# these two lines are kept only until the folder itself is reviewed for removal.
+!mlhc_code_release/README.md
+!mlhc_code_release/requirements.txt
+
+# Exceptions: new top-level repo structure (overrides *.md / *.txt / *.json / *.png above)
+!/README.md
+!/CONTRIBUTING.md
+!/requirements.txt
+!/data/README.md
+!/results/README.md

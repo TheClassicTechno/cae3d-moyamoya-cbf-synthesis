@@ -11,6 +11,15 @@ Requires: pip install openpyxl (for xlsx).
 from __future__ import annotations
 
 import os
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+import os
 import random
 import json
 import argparse
@@ -42,8 +51,8 @@ def _load_xlsx_csv_fallback(csv_path: str) -> list[list]:
         return list(csv.reader(f))
 
 # Paths under data1/julih
-DATA_2020_ROOT = "/data1/julih/moyamoya_2020_nifti"
-XLSX_PATH = "/data1/julih/Files 2020.xlsx"
+DATA_2020_ROOT = os.path.join(_REPO_ROOT, "moyamoya_2020_nifti")
+XLSX_PATH = os.path.join(_REPO_ROOT, "Files 2020.xlsx")
 CBF_PRE_SUBDIR = "derived/pre_surgery_yes_diamox/perf/asl_single_delay_pre_diamox"
 CBF_POST_SUBDIR = "derived/pre_surgery_yes_diamox/perf/asl_single_delay_post_diamox"
 CBF_FILE = "CBF_Single_Delay_Pre_Diamox_standard_lin.nii.gz"  # pre folder; post folder has same filename (content is post-Diamox)
@@ -205,7 +214,7 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--train-frac", type=float, default=0.75)
     ap.add_argument("--val-frac", type=float, default=0.125)
-    ap.add_argument("--out", default="/data1/julih/2020_single_delay_split.json", help="Output JSON path")
+    ap.add_argument("--out", default=os.path.join(_REPO_ROOT, "2020_single_delay_split.json"), help="Output JSON path")
     ap.add_argument("--list-pairs", action="store_true", help="Print (subject_id, pre_path, post_path) and exit")
     ap.add_argument("--no-xlsx", action="store_true", help="Discover subjects from filesystem only (no xlsx filter)")
     args = ap.parse_args()

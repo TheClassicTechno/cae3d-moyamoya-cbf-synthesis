@@ -12,10 +12,18 @@ Key Differences from 2D:
 Reference: Bansal et al. "Cold Diffusion" (2022)
 """
 
+import os
 import os, sys, glob, json, random, time
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 import torch
 import torch.nn as nn
@@ -238,8 +246,8 @@ def evaluate_model(model, loader, n_timesteps, alpha_schedule, device, pad_3d=No
                 post_i = post_np[i, 0]
                 if pad_3d is not None:
                     import sys
-                    if "/data1/julih/scripts" not in sys.path:
-                        sys.path.insert(0, "/data1/julih/scripts")
+                    if os.path.join(_REPO_ROOT, "scripts") not in sys.path:
+                        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
                     from week7_preprocess import metrics_in_brain
                     m = metrics_in_brain(pred_i, post_i, data_range=1.0)
                     mae_list.append(m["mae_mean"])
@@ -294,26 +302,32 @@ def main():
     
     # Load data
     print(f"\n📂 Loading data...")
-    use_week7 = os.environ.get('WEEK7', '').lower() in ('1', 'true', 'yes') or '--week7' in sys.argv
+    sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
+    from week7_preprocess import is_env_flag, is_week7_kfold, TARGET_SHAPE, get_combined_split_path, week7_kfold_suffix_paths
+    use_week7 = (
+        is_env_flag('WEEK7')
+        or '--week7' in sys.argv
+        or is_week7_kfold()
+    )
     pad_3d = None
     ckpt_name = 'cold_diffusion_3d_best.pt'
     results_name = 'cold_diffusion_3d_results.json'
     if use_week7:
-        sys.path.insert(0, '/data1/julih/scripts')
         from week7_data import get_week7_splits, Week7VolumePairs3D
-        from week7_preprocess import TARGET_SHAPE
+        print(f"  Split JSON: {get_combined_split_path()}")
         train_pairs, val_pairs, test_pairs = get_week7_splits()
         CONFIG['target_size'] = PAD_3D_WEEK7
         pad_3d = PAD_3D_WEEK7
-        use_phase2 = os.environ.get('WEEK7_REGION_WEIGHT', '').lower() in ('1', 'true', 'yes')
+        use_phase2 = is_env_flag('WEEK7_REGION_WEIGHT')
         ckpt_name = 'cold_diffusion_3d_week7_best.pt'
         results_name = 'cold_diffusion_3d_week7_phase2_results.json' if use_phase2 else 'cold_diffusion_3d_week7_results.json'
+        ckpt_name, results_name = week7_kfold_suffix_paths(ckpt_name, results_name)
         print(f"  Week7: 91x109x91 + brain mask: {len(train_pairs)} train / {len(val_pairs)} val / {len(test_pairs)} test")
         train_dataset = Week7VolumePairs3D(train_pairs, augment=True, target_shape=TARGET_SHAPE)
         val_dataset = Week7VolumePairs3D(val_pairs, augment=False, target_shape=TARGET_SHAPE)
         test_dataset = Week7VolumePairs3D(test_pairs, augment=False, target_shape=TARGET_SHAPE)
     else:
-        data_dir = "/data1/julih"
+        data_dir = _REPO_ROOT
         all_pre = sorted(glob.glob(f"{data_dir}/pre/pre_*.nii.gz"))
         all_pre_paired = [p for p in all_pre if os.path.exists(pre_to_post_path(p))]
         print(f"  Found {len(all_pre_paired)} paired volumes")

@@ -18,6 +18,13 @@ import random
 import time
 from typing import List
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
@@ -30,7 +37,7 @@ from torch.utils.data import Dataset, DataLoader
 from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
 
 # Add paths
-sys.path.append('/data1/julih/Diffusion_3D_Latent')
+sys.path.append(os.path.join(_REPO_ROOT, 'Diffusion_3D_Latent'))
 from utils import EMA, strict_normalize_volume, bland_altman_analysis
 
 from patch_volume_vae import (
@@ -60,7 +67,7 @@ def load_full_volume(nii_path: str, target_size=(128, 128, 64)) -> np.ndarray:
 
 def load_volume_week7(nii_path: str, pad_shape=(96, 112, 96)) -> np.ndarray:
     """Week7: load 91×109×91 brain mask + minmax, then pad to pad_shape."""
-    sys.path.insert(0, '/data1/julih/scripts')
+    sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
     from week7_preprocess import load_volume, TARGET_SHAPE
     vol = load_volume(nii_path, target_shape=TARGET_SHAPE, apply_mask=True, minmax=True)
     if vol.shape != pad_shape:
@@ -273,8 +280,8 @@ def evaluate_patch_diffusion(
                 # Calculate metrics (brain-only when Week7 / load_fn)
                 if load_fn is not None:
                     import sys
-                    if "/data1/julih/scripts" not in sys.path:
-                        sys.path.insert(0, "/data1/julih/scripts")
+                    if os.path.join(_REPO_ROOT, "scripts") not in sys.path:
+                        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
                     from week7_preprocess import metrics_in_brain
                     m = metrics_in_brain(pred_vol, post_vol, data_range=1.0)
                     mae_list.append(m["mae_mean"])
@@ -328,12 +335,31 @@ def main():
     print("="*70)
     
     eval_only = '--eval-only' in sys.argv
-    use_week7 = '--week7' in sys.argv or os.environ.get('WEEK7', '').lower() in ('1', 'true', 'yes')
-    use_phase2 = use_week7 and os.environ.get('WEEK7_REGION_WEIGHT', '').lower() in ('1', 'true', 'yes')
+    sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
+    from week7_preprocess import is_env_flag, is_week7_kfold, week7_kfold_suffix_paths, week7_kfold_suffix_checkpoint
+    use_week7 = (
+        '--week7' in sys.argv
+        or is_env_flag('WEEK7')
+        or is_week7_kfold()
+    )
+    use_phase2 = use_week7 and is_env_flag('WEEK7_REGION_WEIGHT')
     ckpt_name = 'patch_diffusion_week7_best.pt' if use_week7 else 'patch_diffusion_best.pt'
     ema_ckpt_name = 'patch_diffusion_ema_week7_best.pt' if use_week7 else 'patch_diffusion_ema_best.pt'
     vae_ckpt_name = 'patch_vae_week7_best.pt' if use_week7 else 'patch_vae_best.pt'
     results_name = 'patch_diffusion_week7_phase2_results.json' if use_phase2 else ('patch_diffusion_week7_results.json' if use_week7 else 'patch_diffusion_results.json')
+    if use_week7:
+        ckpt_name, results_name = week7_kfold_suffix_paths(ckpt_name, results_name)
+        ema_ckpt_name = week7_kfold_suffix_checkpoint(ema_ckpt_name)
+        vae_ckpt_name = week7_kfold_suffix_checkpoint(vae_ckpt_name)
+
+    # Env var overrides for checkpoint and results filenames (mirrors UNet3D/CAE3D interface)
+    if os.environ.get("WEEK7_CKPT_NAME", "").strip():
+        ckpt_name     = os.environ["WEEK7_CKPT_NAME"].strip()
+        ema_ckpt_name = ckpt_name.replace(".pt", "_ema.pt")
+        vae_ckpt_name = ckpt_name.replace(".pt", "_vae.pt")
+    if os.environ.get("WEEK7_RESULTS_JSON", "").strip():
+        results_name  = os.environ["WEEK7_RESULTS_JSON"].strip()
+
     # Configuration (Week7: pad 96×96×96, patch 24³ so VAE encoder/decoder spatial sizes match)
     CONFIG = {
         'target_size': (96, 96, 96) if use_week7 else (128, 128, 64),
@@ -362,7 +388,12 @@ def main():
         'diffusion_early_stop': 15,
         'ema_decay': 0.9999,
     }
-    
+
+    # Env var override for epoch count (mirrors UNet3D/CAE3D interface)
+    if os.environ.get("WEEK7_EPOCHS", "").strip():
+        CONFIG['diffusion_epochs'] = int(os.environ["WEEK7_EPOCHS"].strip())
+        CONFIG['vae_epochs']       = int(os.environ["WEEK7_EPOCHS"].strip())
+
     print(f"\nConfiguration:")
     for k, v in CONFIG.items():
         print(f"  {k}: {v}")
@@ -375,16 +406,35 @@ def main():
     # Load data
     print(f"\n Loading data...")
     if use_week7:
-        sys.path.insert(0, '/data1/julih/scripts')
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
         from week7_data import get_week7_splits
         train_pairs, val_pairs, test_pairs = get_week7_splits()
         train_pre = [p[0] for p in train_pairs]
         val_pre = [p[0] for p in val_pairs]
         test_pre = [p[0] for p in test_pairs]
         print(f"  Week7: {len(train_pairs)} train / {len(val_pairs)} val / {len(test_pairs)} test (combined 2020-2023)")
+
+        # Env var override: load splits from a custom JSON (mirrors UNet3D/CAE3D interface)
+        _split_override = os.environ.get("WEEK7_SPLIT_PATH", "").strip()
+        if _split_override and os.path.isfile(_split_override):
+            import json as _json
+            with open(_split_override) as _sf:
+                _sp = _json.load(_sf)
+            def _to_pairs(subjects):
+                return [(s["pre_path"], s["post_path"]) for s in subjects
+                        if os.path.isfile(s["pre_path"]) and os.path.isfile(s["post_path"])]
+            train_pairs = _to_pairs(_sp["train"])
+            val_pairs   = _to_pairs(_sp["val"])
+            test_pairs  = _to_pairs(_sp["test"])
+            train_pre   = [p[0] for p in train_pairs]
+            val_pre     = [p[0] for p in val_pairs]
+            test_pre    = [p[0] for p in test_pairs]
+            print(f"  WEEK7_SPLIT_PATH override: {_split_override}")
+            print(f"  Override split: {len(train_pairs)} train / {len(val_pairs)} val / {len(test_pairs)} test")
+
         load_fn = lambda p: load_volume_week7(p, pad_shape=(96, 96, 96))
     else:
-        data_dir = "/data1/julih"
+        data_dir = _REPO_ROOT
         all_pre = sorted(glob.glob(f"{data_dir}/pre/pre_*.nii.gz"))
         all_pre_paired = [p for p in all_pre if os.path.exists(pre_to_post_path(p))]
         trainval_pre, test_pre = train_test_split(

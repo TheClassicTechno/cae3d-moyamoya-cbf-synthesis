@@ -17,7 +17,7 @@ import csv
 import json
 from pathlib import Path
 
-ROOT = Path("/data1/julih")
+ROOT = Path("<repo-root>")
 DEFAULT_PER_SUBJECT = ROOT / "week8_per_subject_metrics"
 DEFAULT_OUT = ROOT / "week9_stats"
 

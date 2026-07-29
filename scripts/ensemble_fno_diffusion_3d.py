@@ -3,7 +3,7 @@
 Ensemble: FNO 3D + 3D DDPM (simple). Same test split (seed 42), average predictions.
 FNO runs at (128,128,64); diffusion at (64,64,32) then upsampled to (128,128,64).
 Usage:
-  /home/eboyers/monai_env/bin/python3 scripts/ensemble_fno_diffusion_3d.py --w-fno 0.5 --w-diff 0.5 --max-n 10
+  python3 scripts/ensemble_fno_diffusion_3d.py --w-fno 0.5 --w-diff 0.5 --max-n 10
 """
 import os
 import sys
@@ -17,7 +17,14 @@ import torch
 from scipy.ndimage import zoom
 from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
 
-DATA_DIR = "/data1/julih"
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+DATA_DIR = _REPO_ROOT
 SEED = 42
 FNO_SIZE = (128, 128, 64)
 DIFF_SIZE = (64, 64, 32)
@@ -45,11 +52,11 @@ def pre_to_post(pre_path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fno-ckpt", default="/data1/julih/NeuralOperators/fno_3d_finetuned_slice_brain_80ep.pt")
-    ap.add_argument("--diff-ckpt", default="/data1/julih/Diffusion_baseline_3D/ddpm_3d_best.pt")
+    ap.add_argument("--fno-ckpt", default=os.path.join(_REPO_ROOT, "NeuralOperators/fno_3d_finetuned_slice_brain_80ep.pt"))
+    ap.add_argument("--diff-ckpt", default=os.path.join(_REPO_ROOT, "Diffusion_baseline_3D/ddpm_3d_best.pt"))
     ap.add_argument("--w-fno", type=float, default=0.5)
     ap.add_argument("--w-diff", type=float, default=0.5)
-    ap.add_argument("--out-dir", default="/data1/julih/ensemble_fno_diffusion_3d")
+    ap.add_argument("--out-dir", default=os.path.join(_REPO_ROOT, "ensemble_fno_diffusion_3d"))
     ap.add_argument("--max-n", type=int, default=10)
     args = ap.parse_args()
 
@@ -64,7 +71,7 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
 
     # Load FNO
-    sys.path.insert(0, "/data1/julih/NeuralOperators")
+    sys.path.insert(0, os.path.join(_REPO_ROOT, "NeuralOperators"))
     from fno_3d_cvr import SimpleFNO3D, add_position_channels
     fno_ckpt = torch.load(args.fno_ckpt, map_location=device)
     width = fno_ckpt["fc0.weight"].shape[0]
@@ -75,7 +82,7 @@ def main():
     fno.eval()
 
     # Load diffusion (simple model)
-    sys.path.insert(0, "/data1/julih/Diffusion_baseline_3D")
+    sys.path.insert(0, os.path.join(_REPO_ROOT, "Diffusion_baseline_3D"))
     from diffusion_model_3d import (
         SimpleCondDiffusion3D, make_beta_schedule, p_sample_loop_ddim,
     )

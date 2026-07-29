@@ -6,6 +6,9 @@ Reads week8_per_subject_metrics/*.json (model, subject_id, mae, ssim, psnr, pred
 For each model: computes R² = 1 - SS_res/SS_tot over subjects (pred_mean vs target_mean).
 Pairwise paired t-tests (and Wilcoxon) on MAE, SSIM, PSNR across models that share the same subject set.
 
+Primary model (CAE3D / week7_unet3d) and diffusion flagship (Residual_3D_tips) are defined in
+pipeline_model_registry.py.
+
 Usage (from repo root):
   python scripts/week9/week9_stats_best6_r2_and_ptests.py --per_subject_dir week8_per_subject_metrics --output_dir week9_stats
   python scripts/week9/week9_stats_best6_r2_and_ptests.py --per_subject_dir week8_per_subject_metrics --output_dir week9_stats --best6_only
@@ -15,23 +18,27 @@ Output: R² table, pairwise p-value tables (MAE, SSIM, PSNR), and a combined sum
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
-ROOT = Path("/data1/julih")
+ROOT = Path("<repo-root>")
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+from pipeline_model_registry import (
+    CORE_COMPARISON_MODELS,
+    MODEL_DISPLAY_NAME,
+    sort_models_by_reporting_order,
+)
+
 DEFAULT_PER_SUBJECT = ROOT / "week8_per_subject_metrics"
 DEFAULT_OUT = ROOT / "week9_stats"
 
-# Display names for "best 6" (map internal names to paper names when --best6_only)
-BEST6_DISPLAY = {
-    "Residual_3D": "Residual Diffusion 3D (tips)",
-    "UNet_3D": "UNet 3D (combined)",
-    "week7_unet3d": "UNet 3D (scripts)",
-    "week7_resnet3d": "ResNet 3D",
-    "Cold_3D": "Cold Diffusion 3D",
-    "DDPM_3D": "DDPM 3D",
-}
+# --best6_only filters to this set (historical flag name; may include >6 models).
+CORE_MODEL_SET = set(CORE_COMPARISON_MODELS)
 
 
 def r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -60,7 +67,7 @@ def load_per_subject_by_model(per_subject_dir: Path) -> dict:
         if not model:
             # infer from filename: ModelName_subjectid.json
             stem = p.stem
-            for m in list(by_model.keys()) + list(BEST6_DISPLAY.keys()):
+            for m in list(by_model.keys()) + list(MODEL_DISPLAY_NAME.keys()):
                 if stem.startswith(m + "_"):
                     model = m
                     break
@@ -169,17 +176,22 @@ def main():
 
     by_model = load_per_subject_by_model(per_subject_dir)
     if args.best6_only:
-        # keep only models that are in best 6
-        best6_set = set(BEST6_DISPLAY.keys())
-        by_model = {m: rows for m, rows in by_model.items() if m in best6_set}
-        # use display names in output
-        display = BEST6_DISPLAY
+        by_model = {m: rows for m, rows in by_model.items() if m in CORE_MODEL_SET}
+        display = {m: MODEL_DISPLAY_NAME.get(m, m) for m in by_model}
     else:
         display = {m: m for m in by_model}
 
-    # R² per model (using pred_mean vs target_mean)
+    # R² per model (using pred_mean vs target_mean); paper-friendly order when --best6_only
+    model_order = (
+        sort_models_by_reporting_order(list(by_model.keys()))
+        if args.best6_only
+        else sorted(by_model.keys())
+    )
     r2_rows = []
-    for model, rows in by_model.items():
+    for model in model_order:
+        rows = by_model.get(model)
+        if not rows:
+            continue
         pred = [r["pred_mean"] for r in rows if r.get("pred_mean") is not None]
         tgt = [r["target_mean"] for r in rows if r.get("target_mean") is not None]
         n = min(len(pred), len(tgt))

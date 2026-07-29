@@ -3,7 +3,21 @@
 # Use from repo root: bash scripts/week9/run_regional_then_delta_cbf.sh
 
 set -e
-cd /data1/julih
+_find_repo_root() {
+  local d
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  while [[ ! -f "$d/pyproject.toml" ]]; do
+    local parent
+    parent="$(dirname "$d")"
+    if [[ "$parent" == "$d" ]]; then
+      echo "Could not locate repository root (pyproject.toml not found)" >&2
+      exit 1
+    fi
+    d="$parent"
+  done
+  echo "$d"
+}
+cd "$(_find_repo_root)"
 
 echo "=== Step 1: Regional eval for Residual_3D ==="
 python3 scripts/week9/week9_regional_eval_all_models.py --only Residual_3D

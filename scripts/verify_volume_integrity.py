@@ -2,7 +2,7 @@
 """
 Verify 3D volume integrity: ensure resize never grows dimensions, and export
 sample resized/pre/post volumes as NIfTI for visual inspection.
-Usage: python verify_volume_integrity.py [--data-dir /data1/julih] [--out-dir /data1/julih/visual_checks/volumes] [--max-volumes 5]
+Usage: python verify_volume_integrity.py [--data-dir <repo-root>] [--out-dir <repo-root>/visual_checks/volumes] [--max-volumes 5]
 """
 import os
 import sys
@@ -12,8 +12,15 @@ import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 TARGET_SIZE = (128, 128, 64)
-DATA_DIR = "/data1/julih"
+DATA_DIR = _REPO_ROOT
 
 
 def load_volume_resize(nii_path: str, target_size: tuple):

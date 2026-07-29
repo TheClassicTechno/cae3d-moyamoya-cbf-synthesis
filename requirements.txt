@@ -1,0 +1,38 @@
+# Core dependencies, pinned to the versions used to produce the reported results.
+torch==2.10.0
+# NOTE: torchvision is not actually imported anywhere in this codebase (only
+# referenced inside a printed install hint in a third-party adapter script).
+# Pinned to 0.25.0 because that is the only torchvision release PyPI's own
+# metadata declares compatible with torch==2.10.0 (0.26.0 requires 2.11.0,
+# 0.27.x requires 2.12.x) -- pip install -r requirements.txt fails otherwise.
+torchvision==0.25.0
+monai==1.5.2
+dipy==1.11.0
+nibabel==5.3.3
+scikit-image==0.26.0
+scikit-learn==1.8.0
+scipy==1.17.0
+numpy==2.4.2
+pandas==3.0.3
+matplotlib==3.10.8
+matplotlib-venn==1.1.2
+seaborn==0.13.2
+tqdm==4.67.3
+einops==0.8.2
+torchio==0.21.3
+SimpleITK==2.5.3
+h5py==3.15.1
+openpyxl==3.1.5
+
+# Used by evaluation/statistics scripts but not confirmed pinned in the
+# primary training environment — verify the installed version before relying
+# on exact reproducibility.
+statsmodels
+natsort
+
+# Optional: only required for the Med3DVLM / SAM-Med3D foundation-model
+# adapters in src/moyamoya_cvr/models/foundation_adapters/. Install with
+# `pip install -r requirements-foundation.txt` if you need those adapters.
+# transformers
+# huggingface_hub
+# segment-anything

@@ -8,6 +8,13 @@ import os
 import sys
 import json
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -16,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from week7_data import get_week7_splits, Week7SlicePairs2D, _subject_id_from_path
 from week7_preprocess import metrics_in_brain_2d, get_brain_mask_2d_slice
 
-DATA_DIR = "/data1/julih"
+DATA_DIR = _REPO_ROOT
 OUT_DIR = os.path.join(DATA_DIR, "week8_per_subject_metrics")
 CKPT_PATH = os.path.join(DATA_DIR, "scripts", "week7_results", "week7_unet2d_best.pt")
 TARGET_2D = (96, 112)

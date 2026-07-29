@@ -1,30 +1,56 @@
 #!/usr/bin/env python3
 """
-Export per-subject metrics for UNet_3D, Cold_3D, Residual_3D, DDPM_3D (test set) for Bland-Altman and Wilcoxon.
-Run from /data1/julih with PyTorch and project dependencies. Writes to week8_per_subject_metrics/<model>_<subject_id>.json.
-Each model requires its Week 7 checkpoint (e.g. unet_3d_week7_best.pt, cold_diffusion_3d_week7_best.pt, etc.).
+Export per-subject metrics for UNet_3D, Cold_3D, Residual_3D, DDPM_3D, FNO_3D, Hybrid_3D, Patch_3D.
+
+Default: test split only -> week8_per_subject_metrics/<model>_<subject_id>.json
+
+Use --splits train,val,test --out-dir <path> for the full combined cohort (see
+week8_export_per_subject_full_cohort.py). Each JSON may include "split": "train"|"val"|"test".
+
+Each model needs its Week 7 checkpoint (e.g. unet_3d_week7_best.pt).
 """
 from __future__ import annotations
+
+import os
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 import os
 import sys
 import json
 import traceback
 
-ROOT = "/data1/julih"
+ROOT = _REPO_ROOT
 OUT_DIR = os.path.join(ROOT, "week8_per_subject_metrics")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # Ensure scripts and week7 data/preprocess are importable
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
-from week7_data import get_week7_splits, Week7VolumePairs3D, _subject_id_from_path
-from week7_preprocess import load_volume, TARGET_SHAPE, metrics_in_brain, get_brain_mask
+from week7_data import get_week7_splits, Week7VolumePairs3D
+from week7_preprocess import (
+    load_volume,
+    TARGET_SHAPE,
+    metrics_in_brain,
+    get_brain_mask,
+    get_pre_post_pairs_with_subject_id,
+    collect_pre_post_quads_by_splits,
+)
 
 import numpy as np
 import torch
 
 WEEK7_ORIGINAL = (91, 109, 91)
 PAD_3D = (96, 112, 96)
+
+
+def _resolve_quads(split_keys):
+    """List of (subject_id, pre, post, split_name)."""
+    return collect_pre_post_quads_by_splits(split_keys)
 
 
 def _pad_3d(pre_t, post_t, target_shape):
@@ -59,8 +85,11 @@ def _brain_mean(pred_vol, target_vol, mask=None):
     return float((pred_vol * mask).sum() / n), float((target_vol * mask).sum() / n)
 
 
-def export_unet_3d():
+def export_unet_3d(out_dir=None, split_keys=None):
     """UNet_3D (tips): single forward pass."""
+    out_dir = out_dir or OUT_DIR
+    split_keys = split_keys or ["test"]
+    os.makedirs(out_dir, exist_ok=True)
     sys.path.insert(0, os.path.join(ROOT, "UNet_3D"))
     try:
         from model_3d import make_unet_3d, _pad_3d_if_needed
@@ -75,13 +104,12 @@ def export_unet_3d():
     model = make_unet_3d().to(device)
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
     model.eval()
-    _, _, test_pairs = get_week7_splits()
-    test_ds = Week7VolumePairs3D(test_pairs, augment=False)
+    quads = _resolve_quads(split_keys)
+    pairs = [(p, q) for (_, p, q, _) in quads]
+    test_ds = Week7VolumePairs3D(pairs, augment=False)
     n = 0
     with torch.no_grad():
-        for i in range(len(test_pairs)):
-            pre_path, _ = test_pairs[i]
-            sid = _subject_id_from_path(pre_path)
+        for i, (sid, _, _, split_name) in enumerate(quads):
             pre_t, post_t = test_ds[i]
             pre_t = pre_t.unsqueeze(0).to(device)
             post_t = post_t.unsqueeze(0).to(device)
@@ -94,16 +122,28 @@ def export_unet_3d():
             post_vol = post_np[0, 0]
             met = metrics_in_brain(pred_vol, post_vol, data_range=1.0)
             pred_mean, target_mean = _brain_mean(pred_vol, post_vol)
-            out = {"model": "UNet_3D", "subject_id": sid, "mae": float(met["mae_mean"]), "ssim": float(met["ssim_mean"]), "psnr": float(met["psnr_mean"]), "pred_mean": pred_mean, "target_mean": target_mean}
-            with open(os.path.join(OUT_DIR, f"UNet_3D_{sid}.json"), "w") as f:
+            out = {
+                "model": "UNet_3D",
+                "subject_id": sid,
+                "split": split_name,
+                "mae": float(met["mae_mean"]),
+                "ssim": float(met["ssim_mean"]),
+                "psnr": float(met["psnr_mean"]),
+                "pred_mean": pred_mean,
+                "target_mean": target_mean,
+            }
+            with open(os.path.join(out_dir, f"UNet_3D_{sid}.json"), "w") as f:
                 json.dump(out, f, indent=0)
             n += 1
-    print("Wrote", n, "per-subject JSONs for UNet_3D")
+    print("Wrote", n, "per-subject JSONs for UNet_3D ->", out_dir)
     return n
 
 
-def export_cold_3d():
+def export_cold_3d(out_dir=None, split_keys=None):
     """Cold Diffusion 3D: iterative sampling."""
+    out_dir = out_dir or OUT_DIR
+    split_keys = split_keys or ["test"]
+    os.makedirs(out_dir, exist_ok=True)
     cold_dir = os.path.join(ROOT, "Diffusion_ColdDiffusion_3D")
     # Ensure Cold's model_3d is used (remove UNet_3D from path if present)
     while cold_dir in sys.path:
@@ -131,13 +171,12 @@ def export_cold_3d():
     model.eval()
     alpha = make_alpha_schedule(100)
     alpha_t = torch.from_numpy(alpha).float().to(device)
-    _, _, test_pairs = get_week7_splits()
-    test_ds = Week7VolumePairs3D(test_pairs, augment=False)
+    quads = _resolve_quads(split_keys)
+    pairs = [(p, q) for (_, p, q, _) in quads]
+    test_ds = Week7VolumePairs3D(pairs, augment=False)
     n = 0
     with torch.no_grad():
-        for i in range(len(test_pairs)):
-            pre_path, _ = test_pairs[i]
-            sid = _subject_id_from_path(pre_path)
+        for i, (sid, _, _, split_name) in enumerate(quads):
             pre_t, post_t = test_ds[i]
             pre_t = pre_t.unsqueeze(0).to(device)
             post_t = post_t.unsqueeze(0).to(device)
@@ -151,16 +190,28 @@ def export_cold_3d():
             post_vol = post_np[0, 0]
             met = metrics_in_brain(pred_vol, post_vol, data_range=1.0)
             pred_mean, target_mean = _brain_mean(pred_vol, post_vol)
-            out = {"model": "Cold_3D", "subject_id": sid, "mae": float(met["mae_mean"]), "ssim": float(met["ssim_mean"]), "psnr": float(met["psnr_mean"]), "pred_mean": pred_mean, "target_mean": target_mean}
-            with open(os.path.join(OUT_DIR, f"Cold_3D_{sid}.json"), "w") as f:
+            out = {
+                "model": "Cold_3D",
+                "subject_id": sid,
+                "split": split_name,
+                "mae": float(met["mae_mean"]),
+                "ssim": float(met["ssim_mean"]),
+                "psnr": float(met["psnr_mean"]),
+                "pred_mean": pred_mean,
+                "target_mean": target_mean,
+            }
+            with open(os.path.join(out_dir, f"Cold_3D_{sid}.json"), "w") as f:
                 json.dump(out, f, indent=0)
             n += 1
-    print("Wrote", n, "per-subject JSONs for Cold_3D")
+    print("Wrote", n, "per-subject JSONs for Cold_3D ->", out_dir)
     return n
 
 
-def export_residual_3d():
+def export_residual_3d(out_dir=None, split_keys=None):
     """Residual Diffusion 3D: full sampling loop over test set."""
+    out_dir = out_dir or OUT_DIR
+    split_keys = split_keys or ["test"]
+    os.makedirs(out_dir, exist_ok=True)
     res_dir = os.path.join(ROOT, "Diffusion_ResidualDiffusion_3D")
     ckpt_path = os.path.join(res_dir, "residual_diffusion_3d_week7_best.pt")
     if not os.path.isfile(ckpt_path):
@@ -187,13 +238,12 @@ def export_residual_3d():
     model = SimpleResidualDiffusion3D(ch=16).to(device)
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
     model.eval()
-    _, _, test_pairs = get_week7_splits()
-    test_ds = Week7VolumePairs3D(test_pairs, augment=False)
+    quads = _resolve_quads(split_keys)
+    pairs = [(p, q) for (_, p, q, _) in quads]
+    test_ds = Week7VolumePairs3D(pairs, augment=False)
     n = 0
     with torch.no_grad():
-        for i in range(len(test_pairs)):
-            pre_path, _ = test_pairs[i]
-            sid = _subject_id_from_path(pre_path)
+        for i, (sid, _, _, split_name) in enumerate(quads):
             pre_t, post_t = test_ds[i]
             pre_t = pre_t.unsqueeze(0).to(device)
             post_t = post_t.unsqueeze(0).to(device)
@@ -211,16 +261,28 @@ def export_residual_3d():
             post_vol = post_np[0, 0]
             met = metrics_in_brain(pred_vol, post_vol, data_range=1.0)
             pred_mean, target_mean = _brain_mean(pred_vol, post_vol)
-            out = {"model": "Residual_3D", "subject_id": sid, "mae": float(met["mae_mean"]), "ssim": float(met["ssim_mean"]), "psnr": float(met["psnr_mean"]), "pred_mean": pred_mean, "target_mean": target_mean}
-            with open(os.path.join(OUT_DIR, f"Residual_3D_{sid}.json"), "w") as f:
+            out = {
+                "model": "Residual_3D",
+                "subject_id": sid,
+                "split": split_name,
+                "mae": float(met["mae_mean"]),
+                "ssim": float(met["ssim_mean"]),
+                "psnr": float(met["psnr_mean"]),
+                "pred_mean": pred_mean,
+                "target_mean": target_mean,
+            }
+            with open(os.path.join(out_dir, f"Residual_3D_{sid}.json"), "w") as f:
                 json.dump(out, f, indent=0)
             n += 1
-    print("Wrote", n, "per-subject JSONs for Residual_3D")
+    print("Wrote", n, "per-subject JSONs for Residual_3D ->", out_dir)
     return n
 
 
-def export_ddpm_3d():
+def export_ddpm_3d(out_dir=None, split_keys=None):
     """DDPM 3D: full sampling loop over test set."""
+    out_dir = out_dir or OUT_DIR
+    split_keys = split_keys or ["test"]
+    os.makedirs(out_dir, exist_ok=True)
     ddpm_dir = os.path.join(ROOT, "Diffusion_baseline_3D")
     ckpt_path = os.path.join(ddpm_dir, "ddpm_3d_week7_best.pt")
     if not os.path.isfile(ckpt_path):
@@ -246,13 +308,12 @@ def export_ddpm_3d():
     model = SimpleCondDiffusion3D(ch=16).to(device)
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
     model.eval()
-    _, _, test_pairs = get_week7_splits()
-    test_ds = Week7VolumePairs3D(test_pairs, augment=False)
+    quads = _resolve_quads(split_keys)
+    pairs = [(p, q) for (_, p, q, _) in quads]
+    test_ds = Week7VolumePairs3D(pairs, augment=False)
     n = 0
     with torch.no_grad():
-        for i in range(len(test_pairs)):
-            pre_path, _ = test_pairs[i]
-            sid = _subject_id_from_path(pre_path)
+        for i, (sid, _, _, split_name) in enumerate(quads):
             pre_t, post_t = test_ds[i]
             pre_t = pre_t.unsqueeze(0).to(device)
             post_t = post_t.unsqueeze(0).to(device)
@@ -268,16 +329,28 @@ def export_ddpm_3d():
             post_vol = post_np[0, 0]
             met = metrics_in_brain(pred_vol, post_vol, data_range=1.0)
             pred_mean, target_mean = _brain_mean(pred_vol, post_vol)
-            out = {"model": "DDPM_3D", "subject_id": sid, "mae": float(met["mae_mean"]), "ssim": float(met["ssim_mean"]), "psnr": float(met["psnr_mean"]), "pred_mean": pred_mean, "target_mean": target_mean}
-            with open(os.path.join(OUT_DIR, f"DDPM_3D_{sid}.json"), "w") as f:
+            out = {
+                "model": "DDPM_3D",
+                "subject_id": sid,
+                "split": split_name,
+                "mae": float(met["mae_mean"]),
+                "ssim": float(met["ssim_mean"]),
+                "psnr": float(met["psnr_mean"]),
+                "pred_mean": pred_mean,
+                "target_mean": target_mean,
+            }
+            with open(os.path.join(out_dir, f"DDPM_3D_{sid}.json"), "w") as f:
                 json.dump(out, f, indent=0)
             n += 1
-    print("Wrote", n, "per-subject JSONs for DDPM_3D")
+    print("Wrote", n, "per-subject JSONs for DDPM_3D ->", out_dir)
     return n
 
 
-def export_fno_3d():
-    """FNO 3D (Week7): fno_3d_week7_best.pt, Week7 test pairs, per-subject JSONs."""
+def export_fno_3d(out_dir=None, split_keys=None):
+    """FNO 3D (Week7): fno_3d_week7_best.pt, Week7 pairs, per-subject JSONs."""
+    out_dir = out_dir or OUT_DIR
+    split_keys = split_keys or ["test"]
+    os.makedirs(out_dir, exist_ok=True)
     fno_dir = os.path.join(ROOT, "NeuralOperators")
     ckpt_path = os.path.join(fno_dir, "fno_3d_week7_best.pt")
     if not os.path.isfile(ckpt_path):
@@ -298,13 +371,12 @@ def export_fno_3d():
     model.load_state_dict(ckpt)
     model = model.to(device)
     model.eval()
-    _, _, test_pairs = get_week7_splits()
-    test_ds = Week7VolumePairsFNO(test_pairs)
+    quads = _resolve_quads(split_keys)
+    pairs = [(p, q) for (_, p, q, _) in quads]
+    test_ds = Week7VolumePairsFNO(pairs)
     n = 0
     with torch.no_grad():
-        for i in range(len(test_pairs)):
-            pre_path, _ = test_pairs[i]
-            sid = _subject_id_from_path(pre_path)
+        for i, (sid, _, _, split_name) in enumerate(quads):
             pre_t, post_t = test_ds[i]
             pre_t = pre_t.unsqueeze(0).to(device)
             post_t = post_t.unsqueeze(0).to(device)
@@ -317,63 +389,114 @@ def export_fno_3d():
             post_vol = post_np[0, 0]
             met = metrics_in_brain(pred_vol, post_vol, data_range=1.0)
             pred_mean, target_mean = _brain_mean(pred_vol, post_vol)
-            out = {"model": "FNO_3D", "subject_id": sid, "mae": float(met["mae_mean"]), "ssim": float(met["ssim_mean"]), "psnr": float(met["psnr_mean"]), "pred_mean": pred_mean, "target_mean": target_mean}
-            with open(os.path.join(OUT_DIR, f"FNO_3D_{sid}.json"), "w") as f:
+            out = {
+                "model": "FNO_3D",
+                "subject_id": sid,
+                "split": split_name,
+                "mae": float(met["mae_mean"]),
+                "ssim": float(met["ssim_mean"]),
+                "psnr": float(met["psnr_mean"]),
+                "pred_mean": pred_mean,
+                "target_mean": target_mean,
+            }
+            with open(os.path.join(out_dir, f"FNO_3D_{sid}.json"), "w") as f:
                 json.dump(out, f, indent=0)
             n += 1
-    print("Wrote", n, "per-subject JSONs for FNO_3D")
+    print("Wrote", n, "per-subject JSONs for FNO_3D ->", out_dir)
     return n
 
 
-def export_hybrid_3d():
+def export_hybrid_3d(out_dir=None, split_keys=None):
     """Run standalone Hybrid_3D per-subject export script."""
+    out_dir = out_dir or OUT_DIR
+    split_keys = split_keys or ["test"]
     script = os.path.join(ROOT, "scripts", "week9", "week9_export_hybrid3d_per_subject.py")
     if not os.path.isfile(script):
         print("Skip Hybrid_3D: script not found", script)
         return 0
     import subprocess
-    r = subprocess.run([sys.executable, script], cwd=ROOT)
-    return 32 if r.returncode == 0 else 0
+
+    r = subprocess.run(
+        [sys.executable, script, "--out-dir", out_dir, "--splits", ",".join(split_keys)],
+        cwd=ROOT,
+    )
+    return 0 if r.returncode != 0 else len(_resolve_quads(split_keys))
 
 
-def export_patch_3d():
+def export_patch_3d(out_dir=None, split_keys=None):
     """Run standalone Patch_3D per-subject export script if present."""
+    out_dir = out_dir or OUT_DIR
+    split_keys = split_keys or ["test"]
     script = os.path.join(ROOT, "scripts", "week9", "week9_export_patch3d_per_subject.py")
     if not os.path.isfile(script):
         print("Skip Patch_3D: script not found", script)
         return 0
     import subprocess
-    r = subprocess.run([sys.executable, script], cwd=ROOT)
-    return 32 if r.returncode == 0 else 0
+
+    r = subprocess.run(
+        [sys.executable, script, "--out-dir", out_dir, "--splits", ",".join(split_keys)],
+        cwd=ROOT,
+    )
+    return 0 if r.returncode != 0 else len(_resolve_quads(split_keys))
+
+
+def run_all_exports(out_dir=None, split_keys=None):
+    """Run every in-tree exporter (same as main())."""
+    out_dir = out_dir or OUT_DIR
+    split_keys = split_keys or ["test"]
+    print("Exporting per-subject metrics; splits=%s out_dir=%s" % (split_keys, out_dir))
+    export_unet_3d(out_dir, split_keys)
+    export_cold_3d(out_dir, split_keys)
+    export_residual_3d(out_dir, split_keys)
+    export_ddpm_3d(out_dir, split_keys)
+    export_fno_3d(out_dir, split_keys)
+    export_hybrid_3d(out_dir, split_keys)
+    export_patch_3d(out_dir, split_keys)
+    print("Output dir:", out_dir)
 
 
 def main():
-    print("Exporting per-subject metrics for external models (Week 7 test set)...")
-    export_unet_3d()
-    export_cold_3d()
-    export_residual_3d()
-    export_ddpm_3d()
-    export_fno_3d()
-    export_hybrid_3d()
-    export_patch_3d()
-    print("Output dir:", OUT_DIR)
+    run_all_exports(OUT_DIR, ["test"])
 
 
 if __name__ == "__main__":
     import argparse
-    p = argparse.ArgumentParser(description="Export per-subject metrics for Week 7 test set")
+
+    p = argparse.ArgumentParser(description="Export per-subject metrics (Week 7 / combined split)")
+    p.add_argument(
+        "--splits",
+        type=str,
+        default="test",
+        help="Comma-separated split keys: train,val,test (default: test only)",
+    )
+    p.add_argument(
+        "--out-dir",
+        type=str,
+        default="",
+        help="Directory for JSON files (default: week8_per_subject_metrics)",
+    )
     p.add_argument("--only", type=str, default="", help="Run only this model (e.g. FNO_3D)")
     args = p.parse_args()
+    split_keys = [x.strip() for x in args.splits.split(",") if x.strip()]
+    out_dir = args.out_dir.strip() or OUT_DIR
     if args.only:
         name = args.only.strip()
         if name == "FNO_3D":
-            export_fno_3d()
+            export_fno_3d(out_dir, split_keys)
         elif name == "Hybrid_3D":
-            export_hybrid_3d()
+            export_hybrid_3d(out_dir, split_keys)
         elif name == "Patch_3D":
-            export_patch_3d()
+            export_patch_3d(out_dir, split_keys)
+        elif name == "UNet_3D":
+            export_unet_3d(out_dir, split_keys)
+        elif name == "Cold_3D":
+            export_cold_3d(out_dir, split_keys)
+        elif name == "Residual_3D":
+            export_residual_3d(out_dir, split_keys)
+        elif name == "DDPM_3D":
+            export_ddpm_3d(out_dir, split_keys)
         else:
-            print("Unknown --only model. Use FNO_3D, Hybrid_3D, or Patch_3D.")
-        print("Output dir:", OUT_DIR)
+            print("Unknown --only model.")
+        print("Output dir:", out_dir)
     else:
-        main()
+        run_all_exports(out_dir, split_keys)

@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
+import os
 import os, re, math, random, json, sys
 from glob import glob
 from typing import List, Tuple
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 import numpy as np
 import nibabel as nib
@@ -258,8 +266,8 @@ def train_one_epoch(model, loader, optimizer, pad_2d=None):
     n = 0
     mask_t = None
     if pad_2d is not None and os.environ.get("WEEK7_REGION_WEIGHT", "").lower() in ("1", "true", "yes"):
-        if "/data1/julih/scripts" not in sys.path:
-            sys.path.insert(0, "/data1/julih/scripts")
+        if os.path.join(_REPO_ROOT, "scripts") not in sys.path:
+            sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
         from week7_preprocess import get_region_weight_mask_for_shape
         mask_np = get_region_weight_mask_for_shape(tuple(pad_2d), vascular_weight=1.5)
         mask_t = torch.from_numpy(mask_np).float().to(DEVICE).unsqueeze(0).unsqueeze(0)
@@ -323,8 +331,8 @@ def evaluate_model(model, loader, pad_2d=None):
         for i in range(gen_np.shape[0]):
             if pad_2d is not None:
                 import sys
-                if "/data1/julih/scripts" not in sys.path:
-                    sys.path.insert(0, "/data1/julih/scripts")
+                if os.path.join(_REPO_ROOT, "scripts") not in sys.path:
+                    sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
                 from week7_preprocess import metrics_in_brain_2d
                 m = metrics_in_brain_2d(gen_np[i], tgt_np[i], data_range=1.0)
                 batch_mae_custom += m["mae_mean"]
@@ -416,7 +424,7 @@ def main():
         # Load best model and run only test eval + save predictions (91x109)
         if not os.path.isfile(MODEL_PATH):
             raise FileNotFoundError(f"No checkpoint at {MODEL_PATH}; train first with --week7")
-        sys.path.insert(0, "/data1/julih/scripts")
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
         from week7_data import get_week7_splits, Week7SlicePairs2D
         _, _, test_pairs = get_week7_splits()
         test_ds = Week7SlicePairs2D(test_pairs, augment=False)
@@ -454,7 +462,7 @@ def main():
     # ------------- Week7: same data/preprocess (91x109x91, brain mask, combined 2020-2023) -------------
     pad_2d = None
     if week7:
-        sys.path.insert(0, "/data1/julih/scripts")
+        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
         from week7_data import get_week7_splits, Week7SlicePairs2D
         train_pairs, val_pairs, test_pairs = get_week7_splits()
         pad_2d = (96, 112)  # pad 91x109 to 96x112 for UNet

@@ -1,20 +1,43 @@
 #!/usr/bin/env python3
 """
-Run SAM-Med3D on full Week7 test set; compute MAE, SSIM, PSNR, Dice (pred mask vs brain mask).
-Saves third_party_foundation_3d/sam_med3d_week7_results.json for comparison with other 3D models.
-Note: SAM-Med3D outputs segmentation masks, so MAE/SSIM/PSNR here are mask-vs-mask (not CVR post).
+NOT the pre→post CBF finetuning baseline — do not use these metrics next to CAE3D Table 1 rows.
+
+This script: pretrained SAM-Med3D **inference** on pre volumes vs **brain mask** overlap (Dice/IoU).
+It does **not** train to predict **post-ACZ** from pre-ACZ.
+
+For **fair** SAM comparison to CAE3D, use:
+  third_party_foundation_3d/run_sam_med3d_week7_cbf_regressor.py
+See: third_party_foundation_3d/FOUNDATION_PRE_TO_POST_FINETUNING.md
+
+---
+Run SAM-Med3D on full Week7 test set; compute overlap + legacy pixel metrics (pred vs Week7 brain mask).
+Saves third_party_foundation_3d/sam_med3d_week7_results.json.
+MAE/SSIM/PSNR on binary maps are not comparable to continuous CBF metrics (see JSON note).
 """
+import glob
 import os
+import re
 import sys
 import json
 import shutil
 import numpy as np
 import nibabel as nib
-from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 SAM_ROOT = os.path.dirname(os.path.abspath(__file__))
-WEEK7_SPLIT = "/data1/julih/combined_subject_split.json"
-BRAIN_MASK = "/data1/julih/MNI152_T1_2mm_brain_mask_dil.nii.gz"
+from foundation_mask_diagnostic_metrics import (  # noqa: E402
+    PIXEL_METRICS_NOTE,
+    align_pred_to_shape,
+    mask_diagnostic_metrics,
+)
+WEEK7_SPLIT = os.path.join(_REPO_ROOT, "combined_subject_split.json")
+BRAIN_MASK = os.path.join(_REPO_ROOT, "MNI152_T1_2mm_brain_mask_dil.nii.gz")
 OUT_DIR = os.path.join(SAM_ROOT, "test_data", "week7_sam_test_set")
 IMAGES_DIR = os.path.join(OUT_DIR, "imagesVa")
 LABELS_DIR = os.path.join(OUT_DIR, "labelsVa")
@@ -24,15 +47,6 @@ RESULTS_JSON = os.path.join(SAM_ROOT, "sam_med3d_week7_results.json")
 
 def load_nii(path):
     return np.asarray(nib.load(path).get_fdata()).squeeze().astype(np.float32)
-
-
-def dice(a, b, thresh=0.5):
-    a = (a > thresh).flatten()
-    b = (b > thresh).flatten()
-    if a.sum() == 0 and b.sum() == 0:
-        return 1.0
-    inter = (a & b).sum()
-    return 2 * inter / (a.sum() + b.sum() + 1e-8)
 
 
 def main():
@@ -85,37 +99,32 @@ def main():
         if (i + 1) % 8 == 0:
             print("  ", i + 1, "/", n)
 
-    # Compute metrics: pred mask vs brain mask (resize to match if needed)
-    mask_ref = load_nii(BRAIN_MASK)
-    mae_list, ssim_list, psnr_list, dice_list = [], [], [], []
+    # Metrics: match preds by test index (test_000_*.nii.gz) so basename changes in split do not break pairing
+    pred_by_i: dict[int, str] = {}
+    for path in glob.glob(os.path.join(PRED_DIR, "test_*.nii.gz")):
+        m = re.match(r"test_(\d+)_", os.path.basename(path))
+        if m:
+            pred_by_i[int(m.group(1))] = path
+
+    mae_list, ssim_list, psnr_list, dice_list, iou_list = [], [], [], [], []
     for i, item in enumerate(pairs):
         pre_path = item.get("pre_path")
         if not pre_path or not os.path.isfile(pre_path):
             continue
-        base = os.path.splitext(os.path.splitext(os.path.basename(pre_path))[0])[0]
-        sid = f"test_{i:03d}_{base}"[:60]
-        pred_path = os.path.join(PRED_DIR, sid + ".nii.gz")
-        gt_path = os.path.join(LABELS_DIR, sid + ".nii.gz")
-        if not os.path.isfile(pred_path):
+        pred_path = pred_by_i.get(i)
+        if not pred_path or not os.path.isfile(pred_path):
             continue
         pred = load_nii(pred_path)
-        gt = load_nii(gt_path)
-        if pred.shape != gt.shape:
-            from scipy.ndimage import zoom
-            factors = [gt.shape[k] / pred.shape[k] for k in range(3)]
-            pred = zoom(pred, factors, order=0)
+        pre_vol = load_nii(pre_path)
+        if pred.shape != pre_vol.shape:
+            pred = align_pred_to_shape(pred, pre_vol.shape)
         pred = np.clip(pred, 0, 1).astype(np.float32)
-        gt = (gt > 0.5).astype(np.float32)
-        mae_list.append(np.abs(pred - gt).mean())
-        try:
-            ssim_list.append(ssim(gt, pred, data_range=1.0))
-        except Exception:
-            ssim_list.append(0.0)
-        try:
-            psnr_list.append(psnr(gt, pred, data_range=1.0))
-        except Exception:
-            psnr_list.append(0.0)
-        dice_list.append(dice(pred, gt))
+        m = mask_diagnostic_metrics(pred)
+        mae_list.append(m["mae"])
+        ssim_list.append(m["ssim"])
+        psnr_list.append(m["psnr"])
+        dice_list.append(m["dice"])
+        iou_list.append(m["iou"])
 
     if not mae_list:
         print("No predictions found.")
@@ -124,7 +133,9 @@ def main():
     results = {
         "model": "SAM-Med3D",
         "task": "mask_vs_brain_mask",
-        "note": "Segmentation (mask); MAE/SSIM/PSNR are pred mask vs brain mask, not CVR.",
+        "note": "Segmentation (mask). Primary: Dice/IoU vs Week7 brain mask on pre grid. Not CBF.",
+        "primary_metrics": ["dice", "iou"],
+        "pixel_image_metrics_note": PIXEL_METRICS_NOTE,
         "n_test": len(mae_list),
         "mae_mean": float(np.mean(mae_list)),
         "mae_std": float(np.std(mae_list)),
@@ -134,6 +145,8 @@ def main():
         "psnr_std": float(np.std(psnr_list)),
         "dice_mean": float(np.mean(dice_list)),
         "dice_std": float(np.std(dice_list)),
+        "iou_mean": float(np.mean(iou_list)),
+        "iou_std": float(np.std(iou_list)),
     }
     with open(RESULTS_JSON, "w") as f:
         json.dump(results, f, indent=2)

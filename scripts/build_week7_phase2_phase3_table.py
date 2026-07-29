@@ -6,7 +6,14 @@ Does not modify WEEK7_TABLE_RESULTS.md (Phase 1 table). Writes WEEK7_TABLE_PHASE
 import os
 import json
 
-ROOT = "/data1/julih"
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+ROOT = _REPO_ROOT
 TABLE_PATH = os.path.join(ROOT, "WEEK7_TABLE_PHASE2_PHASE3.md")
 
 # (path, display_name, "2D" | "3D") - Phase 2 and/or Phase 3 result paths only

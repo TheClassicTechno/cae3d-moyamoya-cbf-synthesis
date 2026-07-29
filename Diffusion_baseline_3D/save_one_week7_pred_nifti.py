@@ -7,9 +7,16 @@ import nibabel as nib
 import torch
 from torch.utils.data import DataLoader
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 # Week7 setup
 os.environ['WEEK7'] = '1'
-sys.path.insert(0, '/data1/julih/scripts')
+sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
 from week7_data import get_week7_splits, Week7VolumePairs3D
 from week7_preprocess import TARGET_SHAPE
 

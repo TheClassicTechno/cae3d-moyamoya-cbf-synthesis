@@ -7,7 +7,7 @@ Maps JSON model names to paper names: week7_unet3d -> CAE_3D_s, UNet_3D -> CAE_3
 import re
 from pathlib import Path
 
-ROOT = Path("/data1/julih")
+ROOT = Path("<repo-root>")
 MD_PATH = ROOT / "week8_stats" / "bland_altman_summary.md"
 TEX_PATH = ROOT / "julipaper.tex"
 

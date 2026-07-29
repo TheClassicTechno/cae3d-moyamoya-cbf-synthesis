@@ -20,6 +20,13 @@ import random
 import time
 from typing import List, Tuple, Optional
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
@@ -59,7 +66,7 @@ def pre_to_post_path(pre_path: str) -> str:
 
 
 def load_volume_week7(nii_path: str, pad_shape=(96, 112, 96)) -> np.ndarray:
-    sys.path.insert(0, '/data1/julih/scripts')
+    sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
     from week7_preprocess import load_volume, TARGET_SHAPE
     vol = load_volume(nii_path, target_shape=TARGET_SHAPE, apply_mask=True, minmax=True)
     if vol.shape != pad_shape:
@@ -337,8 +344,8 @@ def evaluate_model(model, loader, n_timesteps_train, n_steps_ddim, device, patch
     mae_list, ssim_list, psnr_list = [], [], []
     if use_week7:
         import sys
-        if "/data1/julih/scripts" not in sys.path:
-            sys.path.insert(0, "/data1/julih/scripts")
+        if os.path.join(_REPO_ROOT, "scripts") not in sys.path:
+            sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
         from week7_preprocess import metrics_in_brain
 
     with torch.no_grad():
@@ -422,7 +429,7 @@ def main():
     # Load data
     print(f"\n📂 Loading data...")
     if use_week7:
-        sys.path.insert(0, '/data1/julih/scripts')
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
         from week7_data import get_week7_splits
         train_pairs, val_pairs, test_pairs = get_week7_splits()
         load_fn = lambda p: load_volume_week7(p, pad_shape=(96, 112, 96))
@@ -431,7 +438,7 @@ def main():
         test_items = [(a,b) for a,b in zip([p[0] for p in test_pairs], [p[1] for p in test_pairs]) if os.path.isfile(a) and os.path.isfile(b)]
         print(f"  Week7: {len(train_items)} train / {len(val_items)} val / {len(test_items)} test")
     else:
-        data_dir = "/data1/julih"
+        data_dir = _REPO_ROOT
         all_pre = sorted(glob.glob(f"{data_dir}/pre/pre_*.nii.gz"))
         all_pre_paired = [p for p in all_pre if os.path.exists(pre_to_post_path(p))]
         print(f"  Found {len(all_pre_paired)} paired volumes")

@@ -8,7 +8,7 @@ Step 2: Brain-only crop experiment - train 3D UNet on cropped volumes (same arch
   so results are comparable to full-volume runs (same metric definition).
 
 Usage:
-  cd /data1/julih/scripts && python week7_train_unet3d_crop.py
+  cd <repo-root>/scripts && python week7_train_unet3d_crop.py
   SEED=42 python week7_train_unet3d_crop.py
 
 Results: week7_results/week7_unet3d_crop_results.json
@@ -17,6 +17,13 @@ import os
 import sys
 import json
 import random
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 import numpy as np
 import torch
@@ -39,7 +46,7 @@ from week7_preprocess import (
 from monai.networks.nets import UNet
 from monai.losses import SSIMLoss
 
-DATA_DIR = "/data1/julih"
+DATA_DIR = _REPO_ROOT
 OUT_DIR = os.path.join(DATA_DIR, "scripts", "week7_results")
 os.makedirs(OUT_DIR, exist_ok=True)
 

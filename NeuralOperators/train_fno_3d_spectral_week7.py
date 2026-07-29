@@ -15,11 +15,18 @@ import torch
 from torch.utils.data import DataLoader
 from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fno_3d_cvr_spectral import SpectralFNO3D, Week7VolumePairsFNO, WEEK7_PAD_SHAPE, WEEK7_ORIGINAL_SHAPE
 from fno_3d_finetune_slice_brain import composite_loss_slice_brain
 
-sys.path.insert(0, "/data1/julih/scripts")
+sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
 from week7_data import get_week7_splits
 from week7_preprocess import get_region_weight_mask_for_shape
 

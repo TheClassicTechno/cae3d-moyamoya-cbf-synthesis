@@ -10,9 +10,15 @@ Metrics should be computed in same dimensionality (e.g. 2D middle slice vs 2D mi
 Phase 3: Week7VolumePairs3DWithMasks returns (pre, post, mask) for mask-weighted loss.
 """
 import os
-import re
 import random
 from typing import List, Tuple, Optional
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 import numpy as np
 import torch
@@ -23,12 +29,16 @@ import nibabel as nib
 from week7_preprocess import (
     load_volume,
     load_volume_cropped,
+    load_pre_post_pair,
     augment_volume,
     get_pre_post_pairs,
+    get_week7_splits,
     get_brain_mask_for_shape,
     get_brain_bounding_box,
     get_brain_mask,
     TARGET_SHAPE,
+    USE_AFFINE,
+    _subject_id_from_path,
 )
 
 
@@ -58,18 +68,21 @@ class Week7VolumePairs3D(Dataset):
         pairs: List[Tuple[str, str]],
         augment: bool = False,
         target_shape: Tuple[int, int, int] = TARGET_SHAPE,
+        use_affine: Optional[bool] = None,
     ):
         self.pairs = pairs
         self.augment = augment
         self.target_shape = target_shape
+        self.use_affine = use_affine if use_affine is not None else USE_AFFINE
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
         pre_path, post_path = self.pairs[idx]
-        pre = load_volume(pre_path, target_shape=self.target_shape)
-        post = load_volume(post_path, target_shape=self.target_shape)
+        pre, post = load_pre_post_pair(
+            pre_path, post_path, use_affine=self.use_affine, target_shape=self.target_shape
+        )
         if self.augment:
             fl, fu, ff, scale = _random_augment()
             pre = augment_volume(pre, flip_lr=fl, flip_ud=fu, flip_fb=ff, intensity_scale=scale)
@@ -89,19 +102,35 @@ class Week7VolumePairs3DCropped(Dataset):
         augment: bool = False,
         target_shape: Tuple[int, int, int] = TARGET_SHAPE,
         crop_pad_shape: Tuple[int, int, int] = (72, 88, 72),
+        use_affine: Optional[bool] = None,
     ):
         self.pairs = list(pairs)
         self.augment = augment
         self.target_shape = target_shape
         self.crop_pad_shape = crop_pad_shape
+        self.use_affine = use_affine if use_affine is not None else USE_AFFINE
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
         pre_path, post_path = self.pairs[idx]
-        pre = load_volume_cropped(pre_path, target_shape=self.target_shape, pad_to_shape=self.crop_pad_shape)
-        post = load_volume_cropped(post_path, target_shape=self.target_shape, pad_to_shape=self.crop_pad_shape)
+        pre, post = load_pre_post_pair(
+            pre_path, post_path, use_affine=self.use_affine, target_shape=self.target_shape
+        )
+        # Crop to brain bbox and pad (same as load_volume_cropped logic)
+        from week7_preprocess import get_brain_bounding_box, get_brain_mask
+        mask = get_brain_mask()
+        sl_d, sl_h, sl_w = get_brain_bounding_box(mask)
+        pre = pre[sl_d, sl_h, sl_w].copy()
+        post = post[sl_d, sl_h, sl_w].copy()
+        pd, ph, pw = self.crop_pad_shape
+        out_pre = np.zeros(self.crop_pad_shape, dtype=np.float32)
+        out_post = np.zeros(self.crop_pad_shape, dtype=np.float32)
+        cd, ch, cw = pre.shape[0], pre.shape[1], pre.shape[2]
+        out_pre[: min(cd, pd), : min(ch, ph), : min(cw, pw)] = pre[: min(cd, pd), : min(ch, ph), : min(cw, pw)]
+        out_post[: min(cd, pd), : min(ch, ph), : min(cw, pw)] = post[: min(cd, pd), : min(ch, ph), : min(cw, pw)]
+        pre, post = out_pre, out_post
         if self.augment:
             fl, fu, ff, scale = _random_augment()
             pre = augment_volume(pre, flip_lr=fl, flip_ud=fu, flip_fb=ff, intensity_scale=scale)
@@ -119,18 +148,21 @@ class Week7SlicePairs2D(Dataset):
         pairs: List[Tuple[str, str]],
         augment: bool = False,
         target_shape: Tuple[int, int, int] = TARGET_SHAPE,
+        use_affine: Optional[bool] = None,
     ):
         self.pairs = pairs
         self.augment = augment
         self.target_shape = target_shape
+        self.use_affine = use_affine if use_affine is not None else USE_AFFINE
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
         pre_path, post_path = self.pairs[idx]
-        pre = load_volume(pre_path, target_shape=self.target_shape)
-        post = load_volume(post_path, target_shape=self.target_shape)
+        pre, post = load_pre_post_pair(
+            pre_path, post_path, use_affine=self.use_affine, target_shape=self.target_shape
+        )
         # Middle axial slice: index D//2
         mid = self.target_shape[2] // 2
         pre_2d = pre[:, :, mid]   # (H, W)
@@ -145,19 +177,8 @@ class Week7SlicePairs2D(Dataset):
         return pre_t, post_t
 
 
-def _subject_id_from_path(pre_path: str) -> str:
-    """Derive subject id from pre path (e.g. pre_2021_001.nii.gz -> 2021_001)."""
-    base = os.path.basename(pre_path).replace(".nii.gz", "").replace(".nii", "")
-    if base.startswith("pre_"):
-        return base.replace("pre_", "", 1)
-    m = re.match(r"(.+)_pre$", base)
-    if m:
-        return m.group(1)
-    return base.replace("pre", "").strip("_") or "unknown"
-
-
 # Phase 3: subject-specific masks dir (run generate_week7_subject_masks.py first)
-SUBJECT_MASKS_DIR_DEFAULT = "/data1/julih/week7_subject_masks"
+SUBJECT_MASKS_DIR_DEFAULT = os.path.join(_REPO_ROOT, "week7_subject_masks")
 
 
 class Week7VolumePairs3DWithMasks(Dataset):
@@ -170,20 +191,23 @@ class Week7VolumePairs3DWithMasks(Dataset):
         target_shape: Tuple[int, int, int] = TARGET_SHAPE,
         masks_dir: Optional[str] = None,
         pad_shape: Optional[Tuple[int, int, int]] = None,
+        use_affine: Optional[bool] = None,
     ):
         self.pairs = pairs
         self.augment = augment
         self.target_shape = target_shape
         self.masks_dir = masks_dir or os.environ.get("WEEK7_SUBJECT_MASKS_DIR", SUBJECT_MASKS_DIR_DEFAULT)
         self.pad_shape = pad_shape  # if set, mask is resized to pad_shape for loss (e.g. 96,112,96)
+        self.use_affine = use_affine if use_affine is not None else USE_AFFINE
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
         pre_path, post_path = self.pairs[idx]
-        pre = load_volume(pre_path, target_shape=self.target_shape)
-        post = load_volume(post_path, target_shape=self.target_shape)
+        pre, post = load_pre_post_pair(
+            pre_path, post_path, use_affine=self.use_affine, target_shape=self.target_shape
+        )
         sid = _subject_id_from_path(pre_path)
         mask_path = os.path.join(self.masks_dir, f"{sid}.nii.gz")
         if os.path.isfile(mask_path):
@@ -227,19 +251,22 @@ class Week7VolumePairs3DTiedAugment(Dataset):
         augment: bool = True,
         target_shape: Tuple[int, int, int] = TARGET_SHAPE,
         geometric_only_second_view: bool = False,
+        use_affine: Optional[bool] = None,
     ):
         self.pairs = pairs
         self.augment = augment
         self.target_shape = target_shape
         self.geometric_only_second_view = geometric_only_second_view
+        self.use_affine = use_affine if use_affine is not None else USE_AFFINE
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
         pre_path, post_path = self.pairs[idx]
-        pre = load_volume(pre_path, target_shape=self.target_shape)
-        post = load_volume(post_path, target_shape=self.target_shape)
+        pre, post = load_pre_post_pair(
+            pre_path, post_path, use_affine=self.use_affine, target_shape=self.target_shape
+        )
         if self.augment:
             fl1, fu1, ff1, scale1 = _random_augment()
             if self.geometric_only_second_view:
@@ -260,11 +287,3 @@ class Week7VolumePairs3DTiedAugment(Dataset):
         pre2_t = torch.from_numpy(pre2).unsqueeze(0).float()
         post2_t = torch.from_numpy(post2).unsqueeze(0).float()
         return (pre1_t, post1_t), (pre2_t, post2_t)
-
-
-def get_week7_splits():
-    """Return train, val, test pairs (pre_path, post_path) from combined 2020-2023."""
-    train = get_pre_post_pairs("train")
-    val = get_pre_post_pairs("val")
-    test = get_pre_post_pairs("test")
-    return train, val, test

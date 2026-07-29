@@ -13,10 +13,18 @@ Key Changes from 2D:
 Reference: Ho et al. "Denoising Diffusion Probabilistic Models" (2020)
 """
 
+import os
 import os, sys, glob, json, random, time
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
 
 import torch
 import torch.nn as nn
@@ -395,8 +403,8 @@ def evaluate_model(model, loader, n_timesteps, betas, alphas, alphas_bar_sqrt, o
                 post_i = post_np[i, 0]
                 if pad_3d is not None:
                     import sys
-                    if "/data1/julih/scripts" not in sys.path:
-                        sys.path.insert(0, "/data1/julih/scripts")
+                    if os.path.join(_REPO_ROOT, "scripts") not in sys.path:
+                        sys.path.insert(0, os.path.join(_REPO_ROOT, "scripts"))
                     from week7_preprocess import metrics_in_brain
                     m = metrics_in_brain(pred_i, post_i, data_range=1.0)
                     mae_list.append(m["mae_mean"])
@@ -441,8 +449,8 @@ def main():
         'use_2020': False,
         'use_week7': os.environ.get('WEEK7', '').lower() in ('1', 'true', 'yes') or '--week7' in sys.argv,
         'beta_schedule': 'cosine' if '--cosine' in sys.argv else os.environ.get('BETA_SCHEDULE', 'linear'),
-        'split_2020_json': '/data1/julih/2020_single_delay_split.json',
-        'combined_split_json': '/data1/julih/combined_subject_split.json',
+        'split_2020_json': '<repo-root>/2020_single_delay_split.json',
+        'combined_split_json': '<repo-root>/combined_subject_split.json',
     }
     
     print(f"\nConfiguration:")
@@ -473,7 +481,7 @@ def main():
     ckpt_base = 'ddpm_3d_best'
     pad_3d = None
     if CONFIG.get('use_week7'):
-        sys.path.insert(0, '/data1/julih/scripts')
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
         from week7_data import get_week7_splits, Week7VolumePairs3D
         from week7_preprocess import TARGET_SHAPE
         train_pairs, val_pairs, test_pairs = get_week7_splits()
@@ -491,10 +499,10 @@ def main():
         ckpt_base = 'ddpm_3d_combined_best'
         use_json_split = True
     elif CONFIG.get('use_2020'):
-        split_json = CONFIG.get('split_2020_json', '/data1/julih/2020_single_delay_split.json')
+        split_json = CONFIG.get('split_2020_json', '<repo-root>/2020_single_delay_split.json')
         use_json_split = True
     if use_json_split and split_json:
-        sys.path.insert(0, '/data1/julih/scripts')
+        sys.path.insert(0, os.path.join(_REPO_ROOT, 'scripts'))
         from data_2020_single_delay import Dataset2020SingleDelay
         print(f"\n📊 Creating datasets from {split_json}...")
         train_dataset = Dataset2020SingleDelay(split_json, 'train', CONFIG['target_size'])
@@ -502,7 +510,7 @@ def main():
         test_dataset = Dataset2020SingleDelay(split_json, 'test', CONFIG['target_size'])
         print(f"\nSplit: {len(train_dataset)} train / {len(val_dataset)} val / {len(test_dataset)} test (subject-level)")
     elif not CONFIG.get('use_week7'):
-        data_dir = "/data1/julih"
+        data_dir = _REPO_ROOT
         all_pre = sorted(glob.glob(f"{data_dir}/pre/pre_*.nii.gz"))
         all_pre_paired = [p for p in all_pre if os.path.exists(pre_to_post_path(p))]
         print(f"  Found {len(all_pre_paired)} paired volumes")

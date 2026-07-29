@@ -15,6 +15,13 @@ import random
 import time
 from typing import List, Tuple, Optional
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
 import numpy as np
 import nibabel as nib
 from scipy.ndimage import zoom
@@ -26,7 +33,7 @@ from torch.utils.data import Dataset, DataLoader
 from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
 
 import sys
-sys.path.append('/data1/julih/Diffusion_3D_Latent')
+sys.path.append(os.path.join(_REPO_ROOT, 'Diffusion_3D_Latent'))
 from utils import EMA, strict_normalize_volume
 
 from patch_volume_vae import PatchVolumeVAE, extract_patches, reconstruct_volume_from_patches

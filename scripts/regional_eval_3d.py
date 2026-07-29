@@ -4,8 +4,8 @@ Regional evaluation for 3D volumes: apply MNI territory masks to prediction and 
 compute per-region MAE, SSIM, PSNR, and mean perfusion. For evaluation only (not training).
 
 Usage:
-  python regional_eval_3d.py --pre-dir /data1/julih/pre --post-dir /data1/julih/post \\
-    --pred-dir /data1/julih/NeuralOperators/nifti_exports --masks-dir /data1/julih/Masks \\
+  python regional_eval_3d.py --pre-dir <repo-root>/pre --post-dir <repo-root>/post \\
+    --pred-dir <repo-root>/NeuralOperators/nifti_exports --masks-dir <repo-root>/Masks \\
     --out regional_results.json
 
 Prediction files should be named post_{id}_pred.nii.gz (and post_{id}_gt.nii.gz optional);
@@ -21,10 +21,17 @@ import nibabel as nib
 from scipy.ndimage import zoom
 from skimage.metrics import structural_similarity as ssim, peak_signal_noise_ratio as psnr
 
-DATA_DIR = "/data1/julih"
-MASKS_DIR_DEFAULT = "/data1/julih/Masks"
-# Also check Rydham path
-MASKS_DIR_RYDHAM = "/data/rydham/Masks"
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+while not os.path.isfile(os.path.join(_REPO_ROOT, "pyproject.toml")):
+    _parent = os.path.dirname(_REPO_ROOT)
+    if _parent == _REPO_ROOT:
+        raise RuntimeError("Could not locate repository root (pyproject.toml not found)")
+    _REPO_ROOT = _parent
+
+DATA_DIR = _REPO_ROOT
+MASKS_DIR_DEFAULT = os.path.join(_REPO_ROOT, "Masks")
+# Optional secondary search location (env override)
+MASKS_DIR_EXTRA = os.environ.get("MOYAMOYA_MASKS_DIR", "")
 
 
 def load_nifti(path):
@@ -70,13 +77,13 @@ def main():
     ap.add_argument("--pre-dir", default=os.path.join(DATA_DIR, "pre"))
     ap.add_argument("--post-dir", default=os.path.join(DATA_DIR, "post"))
     ap.add_argument("--pred-dir", required=True, help="Directory containing post_*_pred.nii.gz (and optionally post_*_gt.nii.gz)")
-    ap.add_argument("--masks-dir", default="", help="MNI masks dir (default: /data1/julih/Masks or /data/rydham/Masks)")
+    ap.add_argument("--masks-dir", default="", help="MNI masks dir (default: MASKS_DIR_DEFAULT, or $MOYAMOYA_MASKS_DIR if set)")
     ap.add_argument("--pred-glob", default="post_*_pred.nii.gz")
     ap.add_argument("--out", default="regional_results.json")
     args = ap.parse_args()
 
     pred_dir = args.pred_dir
-    masks_dir = args.masks_dir or (MASKS_DIR_DEFAULT if os.path.isdir(MASKS_DIR_DEFAULT) else MASKS_DIR_RYDHAM)
+    masks_dir = args.masks_dir or (MASKS_DIR_DEFAULT if os.path.isdir(MASKS_DIR_DEFAULT) else MASKS_DIR_EXTRA)
     if not os.path.isdir(masks_dir):
         print("Masks dir not found:", masks_dir)
         return
