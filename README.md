@@ -249,10 +249,11 @@ translation would require independent validation on appropriate cohorts and regu
 
 See [`CITATION.cff`](CITATION.cff). Preferred citation:
 
-> Huang, J. et al. "Synthesize Post-Acetazolamide Cerebral Blood Flow Maps from Baseline ASL MRI in Moyamoya
-> Using a 3D Conditional Autoencoder." Machine Learning for Healthcare (MLHC), 2026.
+> Huang, J., Gonzalez, C., Goyal, R., Zou, A., Alexander, S., Moseley, M., Zhao, M.Y., and Steinberg, G.K.
+> "Synthesize Post-Acetazolamide Cerebral Blood Flow Maps from Baseline ASL MRI in Moyamoya Using a 3D
+> Conditional Autoencoder." Machine Learning for Healthcare (MLHC), 2026.
 
-(TODO: full author list, venue proceedings link/DOI to be added once assigned — see `CITATION.cff`.)
+(TODO: venue proceedings link/DOI to be added once assigned — see `CITATION.cff`.)
 
 ## License
 

@@ -4,15 +4,42 @@ title: "Synthesize Post-Acetazolamide Cerebral Blood Flow Maps from Baseline ASL
 type: software
 authors:
   - family-names: Huang
-    given-names: Juli
-    # TODO: add ORCID and any co-authors before public release
+    given-names: Julia
+    # TODO: add ORCIDs before public release
+  - family-names: Gonzalez
+    given-names: Camila
+  - family-names: Goyal
+    given-names: Rydham
+  - family-names: Zou
+    given-names: Aja
+  - family-names: Alexander
+    given-names: Sasha
+  - family-names: Moseley
+    given-names: Michael
+  - family-names: Zhao
+    given-names: Moss Y.
+  - family-names: Steinberg
+    given-names: Gary K.
 preferred-citation:
   type: conference-paper
   title: "Synthesize Post-Acetazolamide Cerebral Blood Flow Maps from Baseline ASL MRI in Moyamoya Using a 3D Conditional Autoencoder"
   authors:
     - family-names: Huang
-      given-names: Juli
-      # TODO: add co-authors in author order as they will appear on the paper
+      given-names: Julia
+    - family-names: Gonzalez
+      given-names: Camila
+    - family-names: Goyal
+      given-names: Rydham
+    - family-names: Zou
+      given-names: Aja
+    - family-names: Alexander
+      given-names: Sasha
+    - family-names: Moseley
+      given-names: Michael
+    - family-names: Zhao
+      given-names: Moss Y.
+    - family-names: Steinberg
+      given-names: Gary K.
   conference:
     name: "Machine Learning for Healthcare (MLHC) 2026"
   year: 2026

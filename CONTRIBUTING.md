@@ -13,10 +13,13 @@ pip install -e ".[dev]"
 
 ## Before opening a pull request
 
-- If `tests/` exists and has content, run it: `pytest tests/`. As of this
-  writing there is no test suite in this repository yet (tracked as a known
-  gap — see the project's validation notes) — if you're adding the first
-  tests, this is the expected location and command.
+- Run the test suite: `pytest tests/`. It currently covers config validation
+  (`pyproject.toml`, `CITATION.cff`, `LICENSE` presence), metrics correctness
+  (SSIM/PSNR sanity and NaN-on-small-mask behavior), missing-data error
+  handling (subject-split and region-mask failure modes), a CAE3D
+  forward-pass smoke test, the package import, and repo-root detection. Add
+  new tests alongside new code rather than treating this as a gap to fill
+  later.
 - Do not commit data, model checkpoints, or anything under `data/` or
   `results/` other than their `README.md` placeholders — see `.gitignore`.
 - Do not introduce hard-coded absolute paths; use the `--data-dir` /
