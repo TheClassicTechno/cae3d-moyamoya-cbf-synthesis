@@ -35,6 +35,12 @@ pretrained/
 # Unrelated local work that has nothing to do with this repository
 music_hw/
 
+# Manuscript diffs and the superseded code-release snapshot must never be
+# committed: the diff has carried real co-author emails/editorial notes in
+# the past, and the snapshot has hardcoded a colleague's absolute path.
+*.diff
+mlhc_code_release/
+
 # Training / run outputs
 runs_*/
 **/runs_*/

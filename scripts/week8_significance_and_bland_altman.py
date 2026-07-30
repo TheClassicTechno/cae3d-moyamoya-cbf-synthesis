@@ -21,7 +21,13 @@ Output: Tables (CSV/MD) with method comparison and, if per-subject data provided
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
+
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from pipeline_model_registry import REPORTING_MODEL_ORDER
 
 
 def load_aggregate_csv(path: str) -> list[dict]:
@@ -84,7 +90,7 @@ def main():
     ap.add_argument("--output_dir", default="week8_stats", help="Output dir for tables")
     ap.add_argument("--paper_order", action="store_true", help="Output Bland-Altman table in paper model order")
     args = ap.parse_args()
-    PAPER_MODEL_ORDER = ["week7_unet3d", "UNet_3D", "week7_resnet3d", "week7_unet2d", "Cold_3D", "Residual_3D", "DDPM_3D"]
+    PAPER_MODEL_ORDER = list(REPORTING_MODEL_ORDER)
 
     os.makedirs(args.output_dir, exist_ok=True)
 
