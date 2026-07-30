@@ -2,8 +2,8 @@
 
 ### Synthesizing post-acetazolamide cerebral blood flow maps from baseline ASL MRI in Moyamoya disease
 
-Part of CNS Lab. Code accompanying: *"Synthesize Post-Acetazolamide Cerebral Blood Flow Maps from Baseline ASL MRI
-in Moyamoya Using a 3D Conditional Autoencoder"* (Machine Learning for Healthcare (MLHC) 2026; see [Citation](#citation)).
+Part of CNS Lab. Code accompanying: *"Synthesizing Post-Acetazolamide Cerebral Blood Flow Maps from Baseline MRI
+in Moyamoya Using 3D Generative AI"* (Machine Learning for Healthcare (MLHC) 2026; see [Citation](#citation)).
 
 ## Overview
 
@@ -115,9 +115,9 @@ python scripts/combined_subject_split.py --out combined_subject_split.json
 python scripts/data_2020_single_delay.py --out 2020_single_delay_split.json
 ```
 
-Both scripts currently default several paths (raw data root, xlsx clinical-score file, output path) to an
-absolute path specific to the original development machine; pass `--data-root` / `--xlsx` / `--out` explicitly
-if running elsewhere (see [Limitations](#limitations-and-intended-use)).
+Both scripts default several paths (raw data root, xlsx clinical-score file, output path) to locations
+under the detected repository root; pass `--data-root` / `--xlsx` / `--out` explicitly if your data lives
+elsewhere.
 
 ## Training
 
@@ -139,10 +139,9 @@ Common environment variables (not all scripts support all of these — check eac
 `SEED` (default 42), `WEEK7_EPOCHS` (default 50 where used), `WEEK7_EVAL_ONLY=1` (skip training, evaluate an
 existing checkpoint), `WEEK7_REGION_WEIGHT=1` (vascular-region-weighted loss variant, where implemented).
 
-**Important:** several training scripts (including the two above) currently hard-code a data/output root path
-specific to the original development machine rather than deriving it from the repository location. As shipped,
-these commands only reproduce as written if the repository is checked out at that same path, or if that
-constant is edited first — see [Limitations](#limitations-and-intended-use).
+The training scripts above derive their data/output root from the detected repository location rather
+than a hard-coded path, so these commands reproduce as written regardless of where the repository is
+checked out.
 
 ## Evaluation
 
@@ -198,36 +197,57 @@ documented anywhere in the tracked code.
 
 ## Key results
 
-From the project's own reporting (verified against this repository's README history; see the manuscript for
-full methodology): 252 scans (2020–2023), subject-level split 189 train / 31 val / 32 test, MNI 91×109×91,
-brain-masked MAE/SSIM/PSNR, three seeds (42, 123, 456) with early stopping for the "reproducible" table below.
+From the MLHC 2026 manuscript (see the paper for full methodology): 252 subject-level pairs identified
+(2020–2023); one excluded after failed affine registration, giving a final cohort of 251 subjects (188 train /
+31 val / 32 held-out test), MNI152 91×109×91, brain-masked MAE/SSIM/PSNR.
 
-2D baseline (middle slice): MAE 0.0497, SSIM 0.7886, PSNR 21.49 dB.
+Held-out test set, primary comparison across all eleven models (mean ± half-width of bootstrap 95% CI; one
+representative trained instance per in-house model, mean ± std over seeds for the two foundation adapters):
 
-Reproducible (three-seed) best:
+| Model | MAE ↓ | SSIM ↑ | PSNR (dB) ↑ | R² |
+|-------|-------|--------|--------------|-----|
+| **CAE3D (ours)** | **0.066 ± 0.001** | **0.80 ± 0.01** | **24.0 ± 0.1** | 0.35 |
+| FNO_3D | 0.072 ± 0.016 | 0.78 ± 0.06 | 24.0 ± 1.3 | 0.47 |
+| ResNet_3D | 0.072 ± 0.008 | 0.80 ± 0.04 | 23.2 ± 0.8 | 0.32 |
+| Patch_3D | 0.078 ± 0.016 | 0.71 ± 0.06 | 22.9 ± 1.4 | 0.28 |
+| CAE_2D | 0.081 ± 0.015 | 0.68 ± 0.09 | 20.8 ± 1.2 | 0.58 |
+| Hybrid_3D | 0.120 ± 0.013 | 0.59 ± 0.04 | 18.8 ± 0.7 | −0.03 |
+| Cold_3D | 0.179 ± 0.011 | 0.37 ± 0.02 | 14.6 ± 0.3 | 0.31 |
+| Residual_3D | 0.250 ± 0.028 | 0.31 ± 0.02 | 13.3 ± 0.95 | −7.44 |
+| DDPM_3D | 0.749 ± 0.027 | 0.04 ± 0.00 | 1.12 ± 0.11 | −68.64 |
+| SAM-Med3D † | 0.083 ± 0.001 | 0.701 ± 0.004 | 22.20 ± 0.03 | 0.45 |
+| Med3DVLM † | 0.098 ± 0.003 | 0.418 ± 0.035 | 15.98 ± 1.86 | 0.46 |
 
-| Model | MAE | SSIM | PSNR (dB) |
-|-------|-----|------|-----------|
-| CAE_3D_s (script 3D) | 0.0689 ± 0.0008 | 0.7971 ± 0.0017 | 23.73 ± 0.09 |
-| CAE_3D (external) | 0.0742 ± 0.0039 | 0.7909 ± 0.0039 | 23.10 ± 0.43 |
+† Foundation adapters (Med3DVLM, SAM-Med3D) use a different evaluation protocol and are not directly comparable
+to the in-house rows above.
 
-Extended (single-run) best — full-volume 3D beats the 2D baseline on all three metrics:
+Seed-to-seed stability (mean ± std over three independent training seeds), fixed held-out test set:
 
-| Model | MAE | SSIM | PSNR (dB) |
-|-------|-----|------|-----------|
-| Residual Diffusion 3D (tips) | 0.0228 | 0.8528 | 26.13 |
-| CAE_3D | 0.0253 | 0.8513 | 25.27 |
-| FNO 3D | 0.0301 | 0.696 | 25.58 |
+| Model | MAE ↓ | SSIM ↑ | PSNR (dB) ↑ |
+|-------|-------|--------|--------------|
+| **CAE3D (ours)** | **0.0663 ± 0.0008** | **0.7986 ± 0.0011** | **24.00 ± 0.08** |
+| Residual_3D_tips | 0.0675 ± 0.0000 | 0.7885 ± 0.0000 | 23.98 ± 0.00 |
+| CAE3D-ES | 0.0722 ± 0.0013 | 0.7933 ± 0.0009 | 23.31 ± 0.15 |
+| Patch_3D | 0.0721 ± 0.0000 | 0.7235 ± 0.0000 | 23.32 ± 0.00 |
+| FNO_3D | 0.0725 ± 0.0001 | 0.7744 ± 0.0003 | 23.87 ± 0.02 |
+| ResNet_3D | 0.0767 ± 0.0008 | 0.7233 ± 0.0056 | 22.32 ± 0.08 |
+| Hybrid_3D | 0.1038 ± 0.0035 | 0.6255 ± 0.0160 | 19.54 ± 0.26 |
+| Cold_3D | 0.2476 ± 0.0173 | 0.2707 ± 0.0390 | 12.27 ± 0.33 |
 
-Per-region MAE in vascular territories, Bland–Altman limits of agreement, and pairwise significance across
-models are also reported; see the manuscript for the full tables.
+CAE3D achieves the lowest held-out MAE among all eleven models, including the two foundation adapters, and its
+MAE advantage over the other trained-from-scratch baselines is statistically significant (paired Wilcoxon,
+Holm-adjusted). Full-volume 3D (CAE3D) outperforms the 2D middle-slice baseline (CAE_2D) on all three metrics,
+though the two are evaluated on different spatial domains and this comparison is supportive rather than a
+controlled dimensionality ablation. Per-region ΔCBF by vascular territory, Bland–Altman limits of agreement, and
+pairwise significance across models are also reported; see the manuscript for the full tables.
 
 ## Limitations and intended use
 
-- **Not yet portable.** Multiple training, preprocessing, and figure/table scripts hard-code an absolute
-  filesystem path from the original development machine (see Training/Evaluation sections above). Running them
-  outside that exact path currently requires editing the relevant path constant or passing the applicable CLI
-  override where one exists.
+- **Portability.** Most training, preprocessing, and figure/table scripts detect the repository root
+  dynamically rather than hard-coding a path, and are checked in `tests/test_repo_root_detection.py`; this
+  was previously a broader issue and has largely been fixed. Some scripts still accept a data/output root
+  via a CLI override or environment variable rather than deriving it automatically — pass `--data-dir` /
+  `--output-dir` (or the applicable env var) where offered.
 - **Single-institution cohort.** Models are trained and evaluated on one clinical Moyamoya cohort; performance
   on other scanners, protocols, or populations is not established.
 - **Foundation-model baselines have different comparability caveats**, per their own script documentation:

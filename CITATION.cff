@@ -1,18 +1,45 @@
 cff-version: 1.2.0
 message: "If you use this code, please cite the paper below."
-title: "Synthesize Post-Acetazolamide Cerebral Blood Flow Maps from Baseline ASL MRI in Moyamoya Using a 3D Conditional Autoencoder"
+title: "Synthesizing Post-Acetazolamide Cerebral Blood Flow Maps from Baseline MRI in Moyamoya Using 3D Generative AI"
 type: software
 authors:
   - family-names: Huang
-    given-names: Juli
-    # TODO: add ORCID and any co-authors before public release
+    given-names: Julia
+    # TODO: add ORCID
+  - family-names: Gonzalez
+    given-names: Camila
+  - family-names: Goyal
+    given-names: Rydham
+  - family-names: Zou
+    given-names: Aja
+  - family-names: Alexander
+    given-names: Sasha
+  - family-names: Moseley
+    given-names: Michael
+  - family-names: Zhao
+    given-names: Moss Y.
+  - family-names: Steinberg
+    given-names: Gary K.
 preferred-citation:
   type: conference-paper
-  title: "Synthesize Post-Acetazolamide Cerebral Blood Flow Maps from Baseline ASL MRI in Moyamoya Using a 3D Conditional Autoencoder"
+  title: "Synthesizing Post-Acetazolamide Cerebral Blood Flow Maps from Baseline MRI in Moyamoya Using 3D Generative AI"
   authors:
     - family-names: Huang
-      given-names: Juli
-      # TODO: add co-authors in author order as they will appear on the paper
+      given-names: Julia
+    - family-names: Gonzalez
+      given-names: Camila
+    - family-names: Goyal
+      given-names: Rydham
+    - family-names: Zou
+      given-names: Aja
+    - family-names: Alexander
+      given-names: Sasha
+    - family-names: Moseley
+      given-names: Michael
+    - family-names: Zhao
+      given-names: Moss Y.
+    - family-names: Steinberg
+      given-names: Gary K.
   conference:
     name: "Machine Learning for Healthcare (MLHC) 2026"
   year: 2026
