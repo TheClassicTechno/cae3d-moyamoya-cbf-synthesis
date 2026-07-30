@@ -45,18 +45,22 @@ EPOCHS_DEFAULT = int(os.environ.get("WEEK9_KFOLD_EPOCHS", "50"))
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fold", type=int, required=True, help="Fold index 0..K-1")
-    ap.add_argument("--kfold_splits", default="week9/kfold_splits.json", help="Path to kfold_splits.json")
+    ap.add_argument("--kfold_splits", default="week9/kfold_splits.json", help="Path to kfold_splits.json (used if WEEK7_SPLIT_PATH not set)")
     ap.add_argument("--epochs", type=int, default=EPOCHS_DEFAULT, help="Max epochs")
     ap.add_argument("--eval_test", action="store_true", help="Run test set eval and save JSON after training")
     ap.add_argument("--out_dir", default="", help="Checkpoint dir (default week7_results)")
     args = ap.parse_args()
 
-    kfold_path = os.path.join(SCRIPT_DIR, args.kfold_splits) if not os.path.isabs(args.kfold_splits) else args.kfold_splits
-    if not os.path.isfile(kfold_path):
-        raise FileNotFoundError("K-fold splits not found: %s" % kfold_path)
-
-    train_pairs, val_pairs = get_train_val_pairs_for_fold(kfold_path, args.fold)
-    _, _, test_pairs = get_week7_splits()
+    # Full K-fold / per-fold JSON: train+val+test from WEEK7_SPLIT_PATH (see week9_write_kfold_split_files_full.py).
+    split_path = os.environ.get("WEEK7_SPLIT_PATH", "").strip()
+    if split_path and os.path.isfile(split_path):
+        train_pairs, val_pairs, test_pairs = get_week7_splits()
+    else:
+        kfold_path = os.path.join(SCRIPT_DIR, args.kfold_splits) if not os.path.isabs(args.kfold_splits) else args.kfold_splits
+        if not os.path.isfile(kfold_path):
+            raise FileNotFoundError("K-fold splits not found: %s (set WEEK7_SPLIT_PATH or pass --kfold_splits)" % kfold_path)
+        train_pairs, val_pairs = get_train_val_pairs_for_fold(kfold_path, args.fold)
+        _, _, test_pairs = get_week7_splits()
 
     train_ds = Week7VolumePairs3D(train_pairs, augment=True)
     val_ds = Week7VolumePairs3D(val_pairs, augment=False)
