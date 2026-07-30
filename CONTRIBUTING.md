@@ -13,10 +13,8 @@ pip install -e ".[dev]"
 
 ## Before opening a pull request
 
-- If `tests/` exists and has content, run it: `pytest tests/`. As of this
-  writing there is no test suite in this repository yet (tracked as a known
-  gap — see the project's validation notes) — if you're adding the first
-  tests, this is the expected location and command.
+- Run the test suite: `pytest tests/` (or `pytest -q` from the repo root; a `pytest.ini` is provided).
+  It requires no private data and no GPU.
 - Do not commit data, model checkpoints, or anything under `data/` or
   `results/` other than their `README.md` placeholders — see `.gitignore`.
 - Do not introduce hard-coded absolute paths; use the `--data-dir` /

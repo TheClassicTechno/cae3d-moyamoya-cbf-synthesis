@@ -9,16 +9,24 @@ plus the private dataset described in `data/README.md`.
 ## Regenerating published results
 
 Given access to the dataset (see `data/README.md`) and the pinned
-environment in `requirements.txt`:
+environment in `requirements.txt`, use the actual per-model entry points
+documented in the top-level `README.md`, e.g.:
 
 ```bash
-python scripts/preprocess.py --data-dir /path/to/raw --output-dir /path/to/processed
-python scripts/train.py --model cae3d --seed 42
-python scripts/evaluate.py --model cae3d --checkpoint results/checkpoints/cae3d_best.pt
+# CAE3D / UNet_3D, week7 pipeline, seed 42
+cd UNet_3D && WEEK7=1 SEED=42 python model_3d.py
+
+# Per-region (vascular territory) evaluation for a model's predictions
+python scripts/regional_eval_3d.py --pred-dir <dir with post_*_pred.nii.gz> --out regional_results.json
+
+# Aggregate multi-seed results with bootstrap CIs
+python scripts/aggregate_week8_seeds.py --results_dir week8_results --output week8_summary.md --ci
 ```
 
-See the top-level `README.md` for the full model list and the paper's
-reported metrics table.
+There is no single `scripts/preprocess.py` / `train.py` / `evaluate.py` entry point; preprocessing is
+applied on-the-fly by `scripts/week7_preprocess.py` / `scripts/week7_data.py`, and each model family has
+its own training script (see the top-level README's "Training" and "Reproducing main tables and
+figures" sections for the full, verified command list).
 
 ## Trained checkpoints
 
